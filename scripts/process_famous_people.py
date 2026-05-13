@@ -1,13 +1,22 @@
 import os
+import time
 import subprocess
 import soundfile as sf
 import io
 import requests
 import warnings
 import torch
+import logging
+import transformers
+import huggingface_hub
 from omnivoice import OmniVoice
 from upload_results import get_drive_service
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+
+# Suppress warnings
+transformers.logging.set_verbosity_error()
+logging.getLogger("transformers").setLevel(logging.ERROR)
+huggingface_hub.logging.set_verbosity_error()
 
 def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...")
@@ -184,7 +193,6 @@ def main():
     print("Loading OmniVoice model...")
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Support loading from a manually cloned git model
     model_path = 'k2-fsa/OmniVoice'
     local_model_path = os.path.join(script_dir, "models", "OmniVoice")
     
@@ -193,100 +201,125 @@ def main():
         model_path = local_model_path
     else:
         print(f"Loading from Hugging Face: {model_path}")
-        print(f"(If this fails, you can manually run: git clone https://huggingface.co/k2-fsa/OmniVoice {local_model_path})")
         
     model = OmniVoice.from_pretrained(model_path)
-    
     upload_script = os.path.join(script_dir, "upload_results.py")
 
-    famous_people_data = get_famous_people_from_drive("famous_people.txt")
+    batch_size = 5
+    round_num = 0
 
-    for item in famous_people_data:
-        if "|" in item:
-            person, sample_text = item.split("|", 1)
-            person = person.strip()
-            sample_text = sample_text.strip()
-        else:
-            person = item.strip()
-            # Fallback if no quote is provided in the file
-            sample_text = "You’re so lucky. You are so lucky to be an opera singer. I mean this."
-            
-        print(f"\n{'='*40}")
-        print(f"Processing: {person}")
-        print(f"{'='*40}")
-        
-        # 2. Each person create a temp folder
-        folder_name = person.replace(" ", "_")
-        temp_base = os.path.join(script_dir, "temp_workspace")
-        os.makedirs(temp_base, exist_ok=True)
-        folder_path = os.path.join(temp_base, folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-        
-        full_wav = os.path.join(folder_path, "full.wav")
-        ref_wav = os.path.join(folder_path, "ref.wav")
-        cloned_wav = os.path.join(folder_path, "cloned.wav")
-        
-        # 3. Use ylp (yt-dlp) to download this person wav
-        if not os.path.exists(full_wav):
-            print(f"Downloading audio for {person}...")
-            # 'ytsearch1' finds the first YouTube search result
-            query = f"{person} speaking speech"
-            cmd_download = [
-                "python", "-m", "yt_dlp",
-                f"ytsearch1:{query}",
-                "-x",                      # Extract audio
-                "--audio-format", "wav",   # Format as wav
-                "-o", full_wav             # Output path
-            ]
-            try:
-                subprocess.run(cmd_download, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"Failed to download audio for {person}: {e}")
-                continue
-        else:
-            print(f"Audio already downloaded for {person}.")
+    while True:
+        round_num += 1
+        print(f"\n{'#'*40}")
+        print(f"  ROUND {round_num} — Fetching fresh list from Drive")
+        print(f"{'#'*40}")
 
-        # 4. Use AI (Silero VAD) to find clear, no background part for ref wav
-        if not os.path.exists(ref_wav):
-            print("Using AI to find clear 8 seconds reference audio...")
-            success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0)
-            if not success:
-                print(f"Failed to find clear speech for {person}.")
-                continue
-        else:
-            print(f"Reference audio already extracted for {person}.")
+        # Re-fetch the list every round so new names can be added to Drive
+        famous_people_data = get_famous_people_from_drive("famous_people.txt")
 
-        # 5. Clone a sample wav
-        if not os.path.exists(cloned_wav):
-            print(f"Cloning sample audio for {person}...")
-            try:
-                audio = model.generate(
-                    text=sample_text,
-                    ref_audio=ref_wav,
-                )
-                sf.write(cloned_wav, audio[0], 24000)
-                print(f"Successfully cloned voice for {person}.")
-            except Exception as e:
-                print(f"Failed to clone voice for {person}: {e}")
-                continue
-        else:
-            print(f"Cloned audio already exists for {person}.")
+        if not famous_people_data:
+            print("No people found. Waiting 60s before retrying...")
+            time.sleep(60)
+            continue
 
-        # 6. Upload to Google Drive folder "materials"
-        print(f"Uploading {folder_name} to Google Drive...")
-        cmd_upload = [
-            "python", upload_script,
-            folder_path,
-            "--name", folder_name,
-            "--parent-name", "materials"
-        ]
-        try:
-            subprocess.run(cmd_upload, check=True)
-            print(f"Successfully uploaded {person} to Google Drive.")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to upload {person}: {e}")
+        # Split into batches of 5
+        batches = [famous_people_data[i:i+batch_size] for i in range(0, len(famous_people_data), batch_size)]
 
-    print("\nAll tasks completed successfully!")
+        for batch_idx, batch in enumerate(batches):
+            print(f"\n{'='*40}")
+            print(f"  Batch {batch_idx+1}/{len(batches)} of Round {round_num}")
+            print(f"{'='*40}")
+
+            for item in batch:
+                if "|" in item:
+                    person, sample_text = item.split("|", 1)
+                    person = person.strip()
+                    sample_text = sample_text.strip()
+                else:
+                    person = item.strip()
+                    sample_text = "You're so lucky. You are so lucky to be an opera singer. I mean this."
+
+                print(f"\nProcessing: {person}")
+
+                folder_name = person.replace(" ", "_")
+                temp_base = os.path.join(script_dir, "temp_workspace")
+                os.makedirs(temp_base, exist_ok=True)
+                folder_path = os.path.join(temp_base, folder_name)
+                os.makedirs(folder_path, exist_ok=True)
+
+                full_wav = os.path.join(folder_path, "full.wav")
+                ref_wav = os.path.join(folder_path, "ref.wav")
+                cloned_wav = os.path.join(folder_path, "cloned.wav")
+
+                # Clear previous run's files so we re-process fresh each round
+                for f in [full_wav, ref_wav, cloned_wav]:
+                    if os.path.exists(f):
+                        os.remove(f)
+
+                # Download
+                print(f"Downloading audio for {person}...")
+                query = f"{person} speaking speech"
+                cookies_file = os.path.join(script_dir, "cookies.txt")
+
+                def build_cmd(search_prefix):
+                    cmd = [
+                        "python", "-m", "yt_dlp",
+                        f"{search_prefix}{query}",
+                        "-x", "--audio-format", "wav",
+                        "-o", full_wav,
+                        "--no-playlist", "--retries", "3", "--socket-timeout", "30",
+                    ]
+                    if os.path.exists(cookies_file):
+                        cmd += ["--cookies", cookies_file]
+                    else:
+                        cmd += ["--cookies-from-browser", "chromium"]
+                    return cmd
+
+                downloaded = False
+                result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
+                if result.returncode == 0 and os.path.exists(full_wav):
+                    downloaded = True
+                else:
+                    print(f"YouTube failed, trying SoundCloud...")
+                    result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
+                    if result.returncode == 0 and os.path.exists(full_wav):
+                        downloaded = True
+
+                if not downloaded:
+                    print(f"Skipping {person} — could not download audio.")
+                    continue
+
+                # VAD
+                success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0)
+                if not success:
+                    print(f"Failed to find clear speech for {person}.")
+                    continue
+
+                # Clone
+                try:
+                    print(f"Cloning voice for {person}...")
+                    audio = model.generate(text=sample_text, ref_audio=ref_wav)
+                    sf.write(cloned_wav, audio[0], 24000)
+                    print(f"Cloned successfully: {person}")
+                except Exception as e:
+                    print(f"Failed to clone {person}: {e}")
+                    continue
+
+                # Upload
+                try:
+                    subprocess.run([
+                        "python", upload_script,
+                        folder_path, "--name", folder_name, "--parent-name", "materials"
+                    ], check=True)
+                    print(f"Uploaded {person} to Google Drive.")
+                except subprocess.CalledProcessError as e:
+                    print(f"Upload failed for {person}: {e}")
+
+            print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...")
+            time.sleep(5)
+
+        print(f"\nRound {round_num} complete. Starting next round immediately...")
+
 
 if __name__ == "__main__":
     main()

@@ -2,14 +2,9 @@ name: auto server
 
 on:
   schedule:
-    # Restart every 6 hours
     - cron: '0 0,6,12,18 * * *'
   workflow_dispatch:
-    inputs:
-      debug_mode:
-        description: 'Enable debug mode (keep runner alive if server crashes)'
-        type: boolean
-        default: false
+
 jobs:
   serve:
     runs-on: ubuntu-latest
@@ -29,25 +24,19 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── 3. Install dependencies into venv ─────────────────────────────────────
+      # ── 3. Install dependencies ───────────────────────────────────────────────
       - name: Install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-          # Auto-activate venv on SSH login
-          echo 'source ${{ github.workspace }}/venv/bin/activate' >> ~/.bashrc
-          echo 'cd ${{ github.workspace }}' >> ~/.bashrc
 
       # ── 4. Install system dependencies ───────────────────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc novnc websockify tmate openssh-server espeak ffmpeg
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-          chmod +x /usr/local/bin/cloudflared
-          curl -fsSL https://code-server.dev/install.sh | sh
+          sudo apt-get install -y espeak ffmpeg chromium-browser chromium-chromedriver
 
       # ── 5. Setup Google Drive Credentials ────────────────────────────────────
       - name: Setup Google Drive Credentials
@@ -59,143 +48,36 @@ jobs:
             echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
           fi
 
-      # ── 6. Start OmniVoice Server and Remote Access ──────────────────────────
-      - name: Start OmniVoice Server
+      # ── 6. Warm up Chromium for yt-dlp cookies ───────────────────────────────
+      - name: Warm up Chromium profile
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          export DISPLAY=:99
+          chromium-browser \
+            --no-sandbox \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --user-data-dir="$HOME/.config/chromium" \
+            --headless=new \
+            https://www.youtube.com &
+          CHROME_PID=$!
+          sleep 10
+          kill $CHROME_PID || true
+
+      # ── 7. Run Famous People Processing ──────────────────────────────────────
+      - name: Run process_famous_people.py
         env:
-          CLOUDFLARE_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_ACCOUNTS_JSON }}
-          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          DISPLAY: ':99'
         run: |
           source venv/bin/activate
-          # ── Setup SSH Server ───────────────────────────────────────────────
-          sudo mkdir -p /var/run/sshd
-          echo "runner:runner" | sudo chpasswd
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          if [ -n "$SSH_PUBLIC_KEY" ]; then
-            echo "$SSH_PUBLIC_KEY" >> ~/.ssh/authorized_keys
-          else
-            echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDFp7XUs9p/avMSQewbn4XubXf6LdosAmRdH7YEyNxgV5pCjPC7ACzpul4Y0vD7GSdPooAyCeAYiQxIwxhFAufHNLazTSx/uNzttbD3Pk8NK73P6dq9a0SLMJJrm3eQZpiWwU3vqnpDDsP92cWBX4CVfa71GPypS49NPf+vCxf+tFrqVdFyvOi5NQQmZAK7FIoEPzfCO/HMwnMcAOQ984o0Gyna70rE6qM/QopHtMg+Gn1qXcaQyLh7D7ju91VTiEWUQVOXLhI9nDHxdFhYbGkTc84v78VKAUapcTFJ+HiTxcAy0xvK0dqvfb9H8WMsQjB4nX5yjfnYfAQeUPSc08rvlVtYRhXG7rSPqZDtBT+sVzZ0XyZLNR0gh23uqoBnc3DbgWNsAmepjSh0mltGsmisoWmnQyJS5XmZ/v/7cjBeQVU0pLmmDodY2eScEOpbU53XTUg/bg5pjNudGB2cS6eP/1GGBp8DXE3cqxb+06bQGgfv/67yFkg15cjlbqrvwMJrgVRlUT4TMqE4UvbmydNJssik4+qYtZO8U/IVRJteQ5hRfaUJMmeqNTBBE1uucApg/6UGgYIEpIbUkOi7IAousqRHfed7gQNLa6hlvFh+ugvUjoqhFwEZtQ3vnIc28uakfgpWCCV0Wct/Zu7s/QbXZqTi2Mr06iij3Ny4i5vrvQ== workstation@192.168.1.158" >> ~/.ssh/authorized_keys
-          fi
-          chmod 600 ~/.ssh/authorized_keys
-          sudo service ssh start
-
-          # ── Start VNC & VS Code Server ─────────────────────────────────────
-          Xvfb :99 -screen 0 1920x1080x24 &
-          sleep 3
-          export DISPLAY=:99
-          x11vnc -display :99 -forever -shared -bg -nopw
-          websockify --web /usr/share/novnc 6080 localhost:5900 &
-
           mkdir -p logs
-          code-server --auth none --bind-addr 127.0.0.1:8080 > logs/code_server.log 2>&1 &
 
-          # ── Start Tunnels ──────────────────────────────────────────────────
-          cloudflared tunnel --url http://127.0.0.1:6080 > vnc_cf.log 2>&1 &
-          cloudflared tunnel --url ssh://127.0.0.1:22 > ssh_cf.log 2>&1 &
-          cloudflared tunnel --url http://127.0.0.1:8080 > vscode_cf.log 2>&1 &
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
+          # Start Xvfb for Chromium cookie access
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
 
-          # ── Wait for URLs ──────────────────────────────────────────────────
-          TIMEOUT_COUNTER=0
-          while true; do
-            if grep -E -q 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' vnc_cf.log 2>/dev/null && \
-               grep -E -q 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' ssh_cf.log 2>/dev/null && \
-               grep -E -q 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' vscode_cf.log 2>/dev/null; then
-              break
-            fi
-            sleep 2
-            TIMEOUT_COUNTER=$((TIMEOUT_COUNTER+1))
-            if [ $TIMEOUT_COUNTER -ge 30 ]; then
-              echo "Timeout waiting for URLs."
-              break
-            fi
-          done
-
-          URL=$(grep -E -o 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' vnc_cf.log | head -n 1)
-          SSH_CF_URL=$(grep -E -o 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' ssh_cf.log | head -n 1 | sed 's|https://||')
-          VSCODE_WEB_URL=$(grep -E -o 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' vscode_cf.log | tail -n 1)
-
-          VSCODE_CMD="ssh -o ProxyCommand=\"cloudflared access ssh --hostname %h\" runner@$SSH_CF_URL"
-
-          TIMEOUT_COUNTER=0
-          SSH_URL=""
-          while [ -z "$SSH_URL" ] && [ $TIMEOUT_COUNTER -lt 15 ]; do
-            SSH_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' | grep ssh || true)
-            sleep 1
-            TIMEOUT_COUNTER=$((TIMEOUT_COUNTER+1))
-          done
-
-          # ── Print all access URLs ──────────────────────────────────────────
-          echo ""
-          echo "=========================================================="
-          echo "  VNC (Browser GUI):  $URL/vnc.html"
-          echo "  VS Code Web:        $VSCODE_WEB_URL/?folder=$(pwd)"
-          echo "  VS Code SSH:        $VSCODE_CMD"
-          echo "  Tmate SSH:          $SSH_URL"
-          echo "  Username: runner    Password: runner"
-          echo "=========================================================="
-          echo ""
-
-          # ── Commit connection info ─────────────────────────────────────────
-          {
-            echo "VSCODE_WEB_URL: $VSCODE_WEB_URL/?folder=$(pwd)"
-            echo "VNC_URL:        $URL/vnc.html"
-            echo "VSCODE_SSH_CMD: $VSCODE_CMD"
-            echo "TMATE_SSH_CMD:  $SSH_URL"
-            echo "USERNAME:       runner"
-            echo "PASSWORD:       runner"
-          } > ssh_connection.txt
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add ssh_connection.txt
-          git commit -m "VS Code + VNC URLs [skip ci]" || true
-          git push origin HEAD:main || true
-
-          # ── Create test sample (no heredoc — uses python3 -c) ─────────────
-          mkdir -p samples
-          python3 -c "
-          content = '''import subprocess
-          text = \"Hello from GitHub Actions runner\"
-          out  = \"samples/test_output.wav\"
-          try:
-              from omnivoice import OmniVoice
-              ov = OmniVoice()
-              ov.synthesize(text, output_path=out)
-              print(\"OmniVoice OK:\", out)
-          except Exception as e:
-              print(\"OmniVoice failed:\", e)
-              subprocess.run([\"espeak\", \"-w\", out, text], check=True)
-              print(\"espeak fallback OK:\", out)
-          '''
-          with open('samples/test_tts.py', 'w') as f:
-              f.write(content)
-          print('samples/test_tts.py created')
-          "
-
-          # ── Start Famous People Processing ───────────────────────────────────
-          echo "Starting process_famous_people.py in the background..."
-          nohup python scripts/process_famous_people.py > logs/process_famous.log 2>&1 &
-
-          # ── Start OmniVoice HTTP server ────────────────────────────────────
-          if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
-            echo "Debug mode enabled. Starting server..."
-            python scripts/run_server.py || true
-            echo "Server exited or crashed. Sleeping for 6 hours for debugging..."
-            sleep 21600
-          else
-            python scripts/run_server.py
-          fi
-
-      # ── 7. Upload Results ─────────────────────────────────────────────────────
-      - name: Upload Results to Google Drive
-        if: always()
-        run: |
-          if [ -d "samples" ] && [ -f "credentials.json" ]; then
-            python scripts/upload_results.py samples --parent-name "TTS_Results_$(date +%Y%m%d)" || echo "Upload skipped or failed"
-          fi
+          # Run the script — it loops forever internally, runner dies after 6h
+          python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
