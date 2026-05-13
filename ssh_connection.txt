@@ -1,0 +1,6 @@
+VSCODE_WEB_URL: https://truly-inside-gratis-delivered.trycloudflare.com/?folder=/home/runner/work/qzeniv_TabTcdS_vlorq/qzeniv_TabTcdS_vlorq
+VNC_URL:        https://sounds-ratings-accessible-providing.trycloudflare.com/vnc.html
+VSCODE_SSH_CMD: ssh runner@ -p 
+TMATE_SSH_CMD:  ssh ettafQxmBpEAQCGj97RpJXRH5@nyc1.tmate.io
+USERNAME:       runner
+PASSWORD:       runner
