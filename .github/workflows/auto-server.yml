@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 0,6,12,18 * * *'
   workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: 'Enable debug mode (keep runner alive if server crashes)'
+        type: boolean
+        default: false
 
 jobs:
   serve:
@@ -127,7 +132,14 @@ jobs:
             sleep 2
           fi
 
-          python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
+          if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+            echo "Debug mode enabled. Running process_famous_people.py..."
+            python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log || true
+            echo "Script exited or crashed. Sleeping for 6 hours for debugging..."
+            sleep 21600
+          else
+            python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
+          fi
 
       # ── 8. Deregister tunnel URL on completion ────────────────────────────────
       - name: Deregister tunnel

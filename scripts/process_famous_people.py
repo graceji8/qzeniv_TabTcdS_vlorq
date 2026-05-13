@@ -209,6 +209,9 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
         except Exception as e:
             print(f"Error uploading to Google Drive: {e}")
 
+    if people:
+        people.sort(key=lambda x: 0 if "politician" in x.lower() else 1)
+
     return people
 
 def main():
@@ -268,6 +271,19 @@ def main():
                 print(f"\nProcessing: {person}")
 
                 folder_name = person.replace(" ", "_")
+
+                # Check if already processed on Google Drive
+                service = get_drive_service()
+                if service:
+                    import upload_results
+                    materials_id = upload_results.get_drive_folder_id(service, "materials")
+                    if materials_id:
+                        person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
+                        if person_folder_id:
+                            contents = upload_results.get_drive_folder_contents(service, person_folder_id)
+                            if "cloned.wav" in contents:
+                                print(f"Skipping {person} — cloned.wav already exists on Google Drive.")
+                                continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
                 os.makedirs(temp_base, exist_ok=True)
                 folder_path = os.path.join(temp_base, folder_name)
