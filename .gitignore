@@ -1,5 +1,5 @@
-ssh_connection.txt 
 *.wav
+temp_workspace/
 ### Linux ###
 *~
 .env 
