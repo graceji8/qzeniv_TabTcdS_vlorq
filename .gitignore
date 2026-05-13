@@ -3,6 +3,7 @@ temp_workspace/
 venv/
 token.pickle
 credentials.json
+youtube_cookies.txt
 ### Linux ###
 *~
 .env 
