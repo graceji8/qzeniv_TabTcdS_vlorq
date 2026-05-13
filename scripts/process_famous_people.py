@@ -109,8 +109,9 @@ def generate_famous_people_with_ai(service=None):
             print(f"Could not fetch existing people to avoid: {e}")
 
     prompt = (
-        f"Generate a completely random and diverse list of 5 famous politicians (past or present). "
-        f"Avoid always picking the most obvious choices (e.g. avoid Barack Obama, Donald Trump, etc. if possible). "
+        f"Generate a list of 5 of the most famous and recognizable CURRENTLY ALIVE top world leaders, "
+        f"prioritizing extremely well-known living figures like Donald Trump, Barack Obama, Emmanuel Macron, etc. "
+        f"DO NOT include anyone who is deceased. "
     )
     
     if avoid_list:
@@ -124,7 +125,55 @@ def generate_famous_people_with_ai(service=None):
         f"Do not include numbering, bullet points, or any other text."
     )
     
-    # Try OpenAI if key exists
+    # Try GitHub Models if GH_MODELS_TOKEN or GITHUB_TOKEN exists
+    github_token = os.environ.get("GH_MODELS_TOKEN") or os.environ.get("GIT_MODEL_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        try:
+            response = requests.post(
+                "https://models.inference.ai.azure.com/chat/completions",
+                headers={"Authorization": f"Bearer {github_token}", "Content-Type": "application/json"},
+                json={
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.9
+                }
+            )
+            data = response.json()
+            content = data['choices'][0]['message']['content']
+            return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+        except Exception as e:
+            print(f"GitHub Models generation failed: {e}")
+
+    # Try Cloudflare Workers AI if CLOUDFLARE_ACCOUNTS_JSON exists
+    cf_accounts_env = os.environ.get("CLOUDFLARE_ACCOUNTS_JSON")
+    if cf_accounts_env:
+        try:
+            import json
+            import random
+            accounts = json.loads(cf_accounts_env)
+            if isinstance(accounts, dict):
+                accounts = [accounts]
+            
+            account = random.choice(accounts)
+            account_id = account.get("account_id")
+            api_token = account.get("api_token")
+            
+            if account_id and api_token:
+                response = requests.post(
+                    f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/meta/llama-3-8b-instruct",
+                    headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+                    json={"messages": [{"role": "user", "content": prompt}]}
+                )
+                data = response.json()
+                if data.get("success"):
+                    content = data["result"]["response"]
+                    return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                else:
+                    print(f"Cloudflare AI failed: {data.get('errors')}")
+        except Exception as e:
+            print(f"Cloudflare AI exception: {e}")
+
+    # Try OpenAI if OPENAI_API_KEY exists
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
         try:
@@ -170,73 +219,14 @@ def generate_famous_people_with_ai(service=None):
 
 # 1. Get the famous people list from Google Drive or Generate it
 def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate=False):
-    print(f"Fetching famous people list from Google Drive ({file_name})...")
     service = get_drive_service()
 
     if not service:
-        print("Could not get Google Drive service. Falling back to AI generation.")
+        print("Could not get Google Drive service. Falling back to AI generation without avoid list.")
         return generate_famous_people_with_ai(None)
 
-    # Always regenerate on forced rounds
-    if not force_regenerate:
-        query = f"name = '{file_name}' and trashed = false"
-        try:
-            results = service.files().list(q=query, fields="files(id, name)").execute()
-            items = results.get('files', [])
-
-            if items:
-                file_id = items[0]['id']
-                request = service.files().get_media(fileId=file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while done is False:
-                    status, done = downloader.next_chunk()
-
-                content = fh.getvalue().decode('utf-8')
-                people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
-
-                if people:
-                    print(f"Successfully loaded {len(people)} people from Google Drive.")
-                    return people
-        except Exception as e:
-            print(f"Error fetching list from Google Drive: {e}")
-
-    # Generate fresh list with AI
-    print("Generating fresh list with AI...")
+    # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
     people = generate_famous_people_with_ai(service)
-
-    if people and service:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        local_file_path = os.path.join(script_dir, file_name)
-        with open(local_file_path, "w", encoding="utf-8") as f:
-            for p in people:
-                f.write(p + "\n")
-
-        print(f"Uploading new list to Google Drive...")
-        import upload_results
-        parent_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
-
-        # Delete old file first to avoid duplicates
-        try:
-            query = f"name = '{file_name}' and trashed = false"
-            results = service.files().list(q=query, fields="files(id)").execute()
-            for old_file in results.get('files', []):
-                service.files().delete(fileId=old_file['id']).execute()
-                print(f"Deleted old {file_name} from Drive.")
-        except Exception as e:
-            print(f"Could not delete old file: {e}")
-
-        media = MediaFileUpload(local_file_path, mimetype='text/plain', resumable=True)
-        file_metadata = {'name': file_name}
-        if parent_id:
-            file_metadata['parents'] = [parent_id]
-
-        try:
-            service.files().create(body=file_metadata, media_body=media).execute()
-            print(f"Uploaded fresh list to Google Drive: {people}")
-        except Exception as e:
-            print(f"Error uploading to Google Drive: {e}")
 
     if people:
         people.sort(key=lambda x: 0 if "politician" in x.lower() else 1)

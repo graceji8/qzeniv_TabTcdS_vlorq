@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+  File "/home/runner/work/qzeniv_TabTcdS_vlorq/qzeniv_TabTcdS_vlorq/scripts/upload_results.py", line 13, in <module>
+    from google.auth.transport.requests import Request
+ModuleNotFoundError: No module named 'google'
