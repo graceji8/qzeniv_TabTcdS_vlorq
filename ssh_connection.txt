@@ -1,6 +1,6 @@
-VSCODE_WEB_URL: https://discounts-respondents-vol-plumbing.trycloudflare.com/?folder=/home/runner/work/qzeniv_TabTcdS_vlorq/qzeniv_TabTcdS_vlorq
-VNC_URL:        https://explicit-try-ssl-logan.trycloudflare.com/vnc.html
-VSCODE_SSH_CMD: ssh -o ProxyCommand="cloudflared access ssh --hostname %h" runner@ladder-crest-obituaries-complimentary.trycloudflare.com
-TMATE_SSH_CMD:  ssh bwaBTfgmFN2zDYJTQMF88eDz7@sfo2.tmate.io
+VSCODE_WEB_URL: https://loved-bold-introducing-bless.trycloudflare.com/?folder=/home/runner/work/qzeniv_TabTcdS_vlorq/qzeniv_TabTcdS_vlorq
+VNC_URL:        https://merge-accessing-patterns-munich.trycloudflare.com/vnc.html
+VSCODE_SSH_CMD: ssh -o ProxyCommand="cloudflared access ssh --hostname %h" runner@ver-eligibility-invitation-comparison.trycloudflare.com
+TMATE_SSH_CMD:  ssh 4jsa7bwVdDXyqqq4MyKcs6NjR@nyc1.tmate.io
 USERNAME:       runner
 PASSWORD:       runner
