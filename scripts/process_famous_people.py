@@ -18,6 +18,16 @@ transformers.logging.set_verbosity_error()
 logging.getLogger("transformers").setLevel(logging.ERROR)
 huggingface_hub.logging.set_verbosity_error()
 
+def _is_valid_cookies_file(path):
+    try:
+        if not os.path.exists(path):
+            return False
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            first_line = f.readline().strip()
+        return 'Netscape HTTP Cookie File' in first_line
+    except Exception:
+        return False
+
 def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...")
     with warnings.catch_warnings():
@@ -25,7 +35,8 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
         model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                                       model='silero_vad',
                                       force_reload=False,
-                                      onnx=False)
+                                      onnx=False,
+                                      trust_repo=True)
     get_speech_timestamps = utils[0]
     
     try:
@@ -286,7 +297,7 @@ def main():
                     ]
                     # Only add cookies for YouTube (SoundCloud needs no auth)
                     is_youtube = search_prefix.startswith("ytsearch")
-                    if is_youtube and os.path.exists(_cookies_file):
+                    if is_youtube and _is_valid_cookies_file(_cookies_file):
                         cmd += ["--cookies", _cookies_file]
                     return cmd
 
