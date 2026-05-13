@@ -48,36 +48,30 @@ jobs:
             echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
           fi
 
-      # ── 6. Warm up Chromium for yt-dlp cookies ───────────────────────────────
-      - name: Warm up Chromium profile
+      # ── 5b. Write YouTube cookies from secret ────────────────────────────────
+      - name: Write YouTube cookies
         run: |
-          Xvfb :99 -screen 0 1920x1080x24 &
-          sleep 2
-          export DISPLAY=:99
-          chromium-browser \
-            --no-sandbox \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            --user-data-dir="$HOME/.config/chromium" \
-            --headless=new \
-            https://www.youtube.com &
-          CHROME_PID=$!
-          sleep 10
-          kill $CHROME_PID || true
+          if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+            echo "${{ secrets.YOUTUBE_COOKIES }}" > scripts/cookies.txt
+            echo "cookies.txt written ($(wc -l < scripts/cookies.txt) lines)"
+          else
+            echo "No YOUTUBE_COOKIES secret found — YouTube will be skipped, SoundCloud only"
+          fi
 
       # ── 7. Run Famous People Processing ──────────────────────────────────────
       - name: Run process_famous_people.py
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # needed for AI list generation
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           DISPLAY: ':99'
         run: |
           source venv/bin/activate
           mkdir -p logs
 
-          # Start Xvfb for Chromium cookie access
-          Xvfb :99 -screen 0 1920x1080x24 &
-          sleep 2
+          # Start Xvfb only if not already running
+          if [ ! -f /tmp/.X99-lock ]; then
+            Xvfb :99 -screen 0 1920x1080x24 &
+            sleep 2
+          fi
 
-          # Run the script — it loops forever internally, runner dies after 6h
           python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log

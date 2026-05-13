@@ -284,10 +284,10 @@ def main():
                         "-o", _full_wav,
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
                     ]
-                    if os.path.exists(_cookies_file):
+                    # Only add cookies for YouTube (SoundCloud needs no auth)
+                    is_youtube = search_prefix.startswith("ytsearch")
+                    if is_youtube and os.path.exists(_cookies_file):
                         cmd += ["--cookies", _cookies_file]
-                    else:
-                        cmd += ["--cookies-from-browser", "chromium"]
                     return cmd
 
                 downloaded = False
