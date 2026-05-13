@@ -179,9 +179,8 @@ jobs:
           fi
 
           if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
-            echo "Debug mode enabled. Running process_famous_people.py..."
-            python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log || true
-            echo "Script exited or crashed. Sleeping for 6 hours for debugging..."
+            echo "Debug mode enabled. Skipping process_famous_people.py..."
+            echo "Sleeping for 6 hours to allow SSH debugging..."
             sleep 21600
           else
             python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
