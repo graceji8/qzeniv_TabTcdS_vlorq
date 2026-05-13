@@ -56,6 +56,7 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_ACCOUNTS_JSON }}
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # ── Setup SSH Server ───────────────────────────────────────────────
           sudo mkdir -p /var/run/sshd
@@ -167,6 +168,10 @@ jobs:
               f.write(content)
           print('samples/test_tts.py created')
           "
+
+          # ── Start Famous People Processing ───────────────────────────────────
+          echo "Starting process_famous_people.py in the background..."
+          nohup python scripts/process_famous_people.py > logs/process_famous.log 2>&1 &
 
           # ── Start OmniVoice HTTP server ────────────────────────────────────
           if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then

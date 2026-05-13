@@ -182,10 +182,21 @@ def get_famous_people_from_drive(file_name="famous_people.txt"):
 
 def main():
     print("Loading OmniVoice model...")
-    # Load model once to save time
-    model = OmniVoice.from_pretrained('k2-fsa/OmniVoice')
-    
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Support loading from a manually cloned git model
+    model_path = 'k2-fsa/OmniVoice'
+    local_model_path = os.path.join(script_dir, "models", "OmniVoice")
+    
+    if os.path.exists(local_model_path):
+        print(f"Local model found! Loading manually from: {local_model_path}")
+        model_path = local_model_path
+    else:
+        print(f"Loading from Hugging Face: {model_path}")
+        print(f"(If this fails, you can manually run: git clone https://huggingface.co/k2-fsa/OmniVoice {local_model_path})")
+        
+    model = OmniVoice.from_pretrained(model_path)
+    
     upload_script = os.path.join(script_dir, "upload_results.py")
 
     famous_people_data = get_famous_people_from_drive("famous_people.txt")
