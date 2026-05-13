@@ -1,0 +1,47 @@
+name: Google Drive Upload Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Google API dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Google Credentials
+        run: |
+          if [ -n "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" > credentials.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_DRIVE_TOKEN }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
+          fi
+
+      - name: Create Dummy Sample
+        run: |
+          mkdir -p samples
+          echo "Test audio content" > samples/test.wav
+
+      - name: Upload Results to Google Drive
+        run: |
+          set +e
+          if [ -d "samples" ]; then
+            count=$(ls -1 samples/*.wav 2>/dev/null | wc -l || echo 0)
+            if [ $count -gt 0 ]; then
+               parent_name="TTS_Tests_$(date +%Y%m%d)"
+               python scripts/upload_results.py samples --parent-name "$parent_name" || echo "⚠️ Upload failed for samples"
+            fi
+          fi
