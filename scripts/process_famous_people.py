@@ -209,7 +209,7 @@ def main():
         else:
             person = item.strip()
             # Fallback if no quote is provided in the file
-            sample_text = "我和习近平主席的关系非常好。其他领导人我不太了解，但习近平主席是一个很好的人、聪明的人，他热爱中国。我很期待到那里去。"
+            sample_text = "You’re so lucky. You are so lucky to be an opera singer. I mean this."
             
         print(f"\n{'='*40}")
         print(f"Processing: {person}")

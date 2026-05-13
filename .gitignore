@@ -1,6 +1,8 @@
 *.wav
 temp_workspace/
 venv/
+token.pickle
+credentials.json
 ### Linux ###
 *~
 .env 

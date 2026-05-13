@@ -55,6 +55,9 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" ]; then
             echo "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" > credentials.json
           fi
+          if [ -n "${{ secrets.GOOGLE_DRIVE_TOKEN }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
+          fi
 
       # ── 6. Start OmniVoice Server and Remote Access ──────────────────────────
       - name: Start OmniVoice Server

@@ -7,6 +7,7 @@ import hashlib
 import time
 import threading
 import fnmatch
+import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.auth.transport.requests import Request
@@ -28,8 +29,15 @@ def get_credentials():
     creds = None
     
     # 1. Try token.pickle (OAuth2 User Token)
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    
+    token_path = 'token.pickle'
+    if not os.path.exists(token_path):
+        token_path = os.path.join(project_root, 'token.pickle')
+
+    if os.path.exists(token_path):
+        with open(token_path, 'rb') as token:
             try:
                 creds = pickle.load(token)
             except Exception:
@@ -48,13 +56,17 @@ def get_credentials():
 
     # 3. Handle credentials.json
     if not creds:
-        if not os.path.exists('credentials.json'):
-            print("Error: No credentials.json found.")
+        creds_path = 'credentials.json'
+        if not os.path.exists(creds_path):
+            creds_path = os.path.join(project_root, 'credentials.json')
+
+        if not os.path.exists(creds_path):
+            print(f"Error: No credentials.json found (checked CWD and {project_root}).")
             return None
         
         # Check if it's a Service Account or OAuth2 Client Secret
         try:
-            with open('credentials.json', 'r') as f:
+            with open(creds_path, 'r') as f:
                 creds_data = json.load(f)
             
             if creds_data.get('type') == 'service_account':
@@ -65,7 +77,7 @@ def get_credentials():
             else:
                 # OAuth2 flow (requires token.pickle for non-interactive)
                 print("Using OAuth2 Client Secrets (requires token.pickle for non-interactive use).")
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
                 # In GitHub Actions, we can't run_local_server unless it's the first time
                 # and the user is running it locally. 
                 # But we'll keep the original logic as fallback.
