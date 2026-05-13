@@ -233,6 +233,61 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     return people
 
+def download_model_from_drive(service, local_model_path):
+    """Download model files from Google Drive 'OmniVoice_model' folder."""
+    import upload_results
+    from googleapiclient.http import MediaIoBaseDownload as DL
+    
+    model_folder_id = upload_results.get_drive_folder_id(service, "OmniVoice_model")
+    if not model_folder_id:
+        return False
+    
+    contents = upload_results.get_drive_folder_contents(service, model_folder_id)
+    if not contents:
+        return False
+    
+    os.makedirs(local_model_path, exist_ok=True)
+    print(f"Downloading {len(contents)} model files from Google Drive...")
+    
+    for fname, finfo in contents.items():
+        local_file = os.path.join(local_model_path, fname)
+        if os.path.exists(local_file):
+            continue
+        print(f"  Downloading {fname}...")
+        request = service.files().get_media(fileId=finfo['id'])
+        fh = io.BytesIO()
+        downloader = DL(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        with open(local_file, 'wb') as f:
+            f.write(fh.getvalue())
+    
+    print("Model downloaded from Google Drive.")
+    return True
+
+def upload_model_to_drive(service, local_model_path):
+    """Upload model files to Google Drive 'OmniVoice_model' folder."""
+    import upload_results
+    
+    model_folder_id = upload_results.create_drive_folder(service, "OmniVoice_model")
+    if not model_folder_id:
+        print("Could not create model folder on Drive.")
+        return
+    
+    for fname in os.listdir(local_model_path):
+        fpath = os.path.join(local_model_path, fname)
+        if os.path.isfile(fpath):
+            print(f"  Uploading {fname} to Drive...")
+            media = MediaFileUpload(fpath, resumable=True)
+            file_metadata = {'name': fname, 'parents': [model_folder_id]}
+            try:
+                service.files().create(body=file_metadata, media_body=media).execute()
+            except Exception as e:
+                print(f"  Failed to upload {fname}: {e}")
+    
+    print("Model uploaded to Google Drive.")
+
 def main():
     print("Loading OmniVoice model...")
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -240,13 +295,34 @@ def main():
     model_path = 'k2-fsa/OmniVoice'
     local_model_path = os.path.join(script_dir, "models", "OmniVoice")
     
-    if os.path.exists(local_model_path):
-        print(f"Local model found! Loading manually from: {local_model_path}")
+    if os.path.exists(local_model_path) and os.listdir(local_model_path):
+        print(f"Local model found! Loading from: {local_model_path}")
         model_path = local_model_path
     else:
-        print(f"Loading from Hugging Face: {model_path}")
-        
+        # Try downloading from Google Drive first
+        service = get_drive_service()
+        if service and download_model_from_drive(service, local_model_path):
+            print(f"Model loaded from Google Drive cache.")
+            model_path = local_model_path
+        else:
+            print(f"Downloading from Hugging Face: {model_path}")
+            # After loading, we'll save to Drive
+    
     model = OmniVoice.from_pretrained(model_path)
+    
+    # If we downloaded from HuggingFace, cache to Google Drive for next time
+    if model_path == 'k2-fsa/OmniVoice':
+        # Find the HF cache path and upload
+        try:
+            from huggingface_hub import snapshot_download
+            hf_local = snapshot_download(repo_id='k2-fsa/OmniVoice')
+            service = get_drive_service()
+            if service and hf_local:
+                print("Caching model to Google Drive for future runs...")
+                upload_model_to_drive(service, hf_local)
+        except Exception as e:
+            print(f"Could not cache model to Drive: {e}")
+    
     upload_script = os.path.join(script_dir, "upload_results.py")
 
     batch_size = 5
@@ -344,21 +420,20 @@ def main():
                     downloaded = True
                     print(f"Downloaded from YouTube.")
                 else:
-                    print(f"YouTube failed with primary config. Trying fallback to chromium cookies...")
+                    print(f"YouTube failed with cookies. Trying without cookies...")
                     fallback_cmd = [
                         "python", "-m", "yt_dlp",
                         f"ytsearch1:{query}",
                         "-x", "--audio-format", "wav",
                         "-o", full_wav,
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
-                        "--cookies-from-browser", "chromium"
                     ]
                     result2 = subprocess.run(fallback_cmd, check=False, capture_output=True, text=True)
                     if result2.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print(f"Downloaded from YouTube (via Chromium fallback).")
+                        print(f"Downloaded from YouTube (no cookies).")
                     else:
-                        print(f"YouTube fallback failed:\n{result2.stderr[-800:]}")
+                        print(f"YouTube fallback also failed:\n{result2.stderr[-800:]}")
 
                 # Try SoundCloud
                 if not downloaded:
@@ -394,7 +469,8 @@ def main():
                 try:
                     subprocess.run([
                         "python", upload_script,
-                        folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+                        folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6",
+                        "--exclude", "full.wav"
                     ], check=True)
                     print(f"Uploaded {person} to Google Drive.")
                 except subprocess.CalledProcessError as e:
