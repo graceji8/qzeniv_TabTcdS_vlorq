@@ -129,64 +129,75 @@ def generate_famous_people_with_ai():
     ]
 
 # 1. Get the famous people list from Google Drive or Generate it
-def get_famous_people_from_drive(file_name="famous_people.txt"):
+def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate=False):
     print(f"Fetching famous people list from Google Drive ({file_name})...")
     service = get_drive_service()
-    
+
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation.")
         return generate_famous_people_with_ai()
-        
-    query = f"name = '{file_name}' and trashed = false"
-    try:
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        items = results.get('files', [])
-        
-        if items:
-            file_id = items[0]['id']
-            request = service.files().get_media(fileId=file_id)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while done is False:
-                status, done = downloader.next_chunk()
-                
-            content = fh.getvalue().decode('utf-8')
-            people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
-            
-            if people:
-                print(f"Successfully loaded {len(people)} people from Google Drive.")
-                return people
-            else:
-                print("File on Google Drive is empty.")
-    except Exception as e:
-        print(f"Error fetching list from Google Drive: {e}")
 
-    # If not found or empty, generate using AI and upload
-    print(f"'{file_name}' not found or empty on Google Drive. Using AI to generate...")
+    # Always regenerate on forced rounds
+    if not force_regenerate:
+        query = f"name = '{file_name}' and trashed = false"
+        try:
+            results = service.files().list(q=query, fields="files(id, name)").execute()
+            items = results.get('files', [])
+
+            if items:
+                file_id = items[0]['id']
+                request = service.files().get_media(fileId=file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+
+                content = fh.getvalue().decode('utf-8')
+                people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+
+                if people:
+                    print(f"Successfully loaded {len(people)} people from Google Drive.")
+                    return people
+        except Exception as e:
+            print(f"Error fetching list from Google Drive: {e}")
+
+    # Generate fresh list with AI
+    print("Generating fresh list with AI...")
     people = generate_famous_people_with_ai()
-    
+
     if people and service:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         local_file_path = os.path.join(script_dir, file_name)
         with open(local_file_path, "w", encoding="utf-8") as f:
             for p in people:
                 f.write(p + "\n")
-                
-        print(f"Uploading newly generated '{file_name}' to Google Drive 'materials' folder...")
+
+        print(f"Uploading new list to Google Drive...")
         import upload_results
         parent_id = upload_results.create_drive_folder(service, "materials")
+
+        # Delete old file first to avoid duplicates
+        try:
+            query = f"name = '{file_name}' and trashed = false"
+            results = service.files().list(q=query, fields="files(id)").execute()
+            for old_file in results.get('files', []):
+                service.files().delete(fileId=old_file['id']).execute()
+                print(f"Deleted old {file_name} from Drive.")
+        except Exception as e:
+            print(f"Could not delete old file: {e}")
+
         media = MediaFileUpload(local_file_path, mimetype='text/plain', resumable=True)
         file_metadata = {'name': file_name}
         if parent_id:
             file_metadata['parents'] = [parent_id]
-            
+
         try:
             service.files().create(body=file_metadata, media_body=media).execute()
-            print("Successfully uploaded the new list to Google Drive.")
+            print(f"Uploaded fresh list to Google Drive: {people}")
         except Exception as e:
             print(f"Error uploading to Google Drive: {e}")
-            
+
     return people
 
 def main():
@@ -214,8 +225,12 @@ def main():
         print(f"  ROUND {round_num} — Fetching fresh list from Drive")
         print(f"{'#'*40}")
 
-        # Re-fetch the list every round so new names can be added to Drive
-        famous_people_data = get_famous_people_from_drive("famous_people.txt")
+        # Round 1: use existing Drive list if available
+        # Round 2+: always generate a fresh AI list
+        famous_people_data = get_famous_people_from_drive(
+            "famous_people.txt",
+            force_regenerate=(round_num > 1)
+        )
 
         if not famous_people_data:
             print("No people found. Waiting 60s before retrying...")
@@ -261,29 +276,39 @@ def main():
                 query = f"{person} speaking speech"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
-                def build_cmd(search_prefix):
+                def build_cmd(search_prefix, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
                     cmd = [
                         "python", "-m", "yt_dlp",
-                        f"{search_prefix}{query}",
+                        f"{search_prefix}{_query}",
                         "-x", "--audio-format", "wav",
-                        "-o", full_wav,
+                        "-o", _full_wav,
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
                     ]
-                    if os.path.exists(cookies_file):
-                        cmd += ["--cookies", cookies_file]
+                    if os.path.exists(_cookies_file):
+                        cmd += ["--cookies", _cookies_file]
                     else:
                         cmd += ["--cookies-from-browser", "chromium"]
                     return cmd
 
                 downloaded = False
+                
+                # Try YouTube
                 result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
                 if result.returncode == 0 and os.path.exists(full_wav):
                     downloaded = True
+                    print(f"Downloaded from YouTube.")
                 else:
-                    print(f"YouTube failed, trying SoundCloud...")
+                    print(f"YouTube failed:\n{result.stderr[-800:]}")  # show full error
+
+                # Try SoundCloud
+                if not downloaded:
+                    print("Trying SoundCloud...")
                     result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
+                        print(f"Downloaded from SoundCloud.")
+                    else:
+                        print(f"SoundCloud failed:\n{result.stderr[-800:]}")  # show full error
 
                 if not downloaded:
                     print(f"Skipping {person} — could not download audio.")
