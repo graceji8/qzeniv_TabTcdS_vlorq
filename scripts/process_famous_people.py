@@ -99,7 +99,7 @@ def generate_famous_people_with_ai(service=None):
     if service:
         try:
             import upload_results
-            materials_id = upload_results.get_drive_folder_id(service, "materials")
+            materials_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
             if materials_id:
                 contents = upload_results.get_drive_folder_contents(service, materials_id)
                 for name, item in contents.items():
@@ -215,7 +215,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
         print(f"Uploading new list to Google Drive...")
         import upload_results
-        parent_id = upload_results.create_drive_folder(service, "materials")
+        parent_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
 
         # Delete old file first to avoid duplicates
         try:
@@ -305,7 +305,7 @@ def main():
                 service = get_drive_service()
                 if service:
                     import upload_results
-                    materials_id = upload_results.get_drive_folder_id(service, "materials")
+                    materials_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
                     if materials_id:
                         person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
                         if person_folder_id:
@@ -404,7 +404,7 @@ def main():
                 try:
                     subprocess.run([
                         "python", upload_script,
-                        folder_path, "--name", folder_name, "--parent-name", "materials"
+                        folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
                     ], check=True)
                     print(f"Uploaded {person} to Google Drive.")
                 except subprocess.CalledProcessError as e:
