@@ -204,9 +204,11 @@ def main():
         print(f"Processing: {person}")
         print(f"{'='*40}")
         
-        # 2. Each person create a folder
+        # 2. Each person create a temp folder
         folder_name = person.replace(" ", "_")
-        folder_path = os.path.join(script_dir, folder_name)
+        temp_base = os.path.join(script_dir, "temp_workspace")
+        os.makedirs(temp_base, exist_ok=True)
+        folder_path = os.path.join(temp_base, folder_name)
         os.makedirs(folder_path, exist_ok=True)
         
         full_wav = os.path.join(folder_path, "full.wav")
