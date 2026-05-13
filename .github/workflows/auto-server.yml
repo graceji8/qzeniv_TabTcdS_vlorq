@@ -41,7 +41,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y espeak ffmpeg chromium-browser chromium-chromedriver tmate openssh-server nodejs
+          sudo apt-get install -y espeak ffmpeg chromium-browser chromium-chromedriver openssh-server nodejs
 
       # ── 5. Setup Google Drive Credentials ────────────────────────────────────
       - name: Setup Google Drive Credentials
@@ -137,8 +137,8 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"url\":\"$TUNNEL_URL\",\"run_id\":\"$GITHUB_RUN_ID\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
-      # ── 6b. Start Tmate SSH for debugging ────────────────────────────────────
-      - name: Start Tmate SSH
+      # ── 6b. Start SSH via Cloudflare ─────────────────────────────────────────
+      - name: Start SSH via Cloudflare
         run: |
           sudo mkdir -p /var/run/sshd
           echo "runner:runner" | sudo chpasswd
@@ -146,19 +146,21 @@ jobs:
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
           sudo service ssh start
 
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          
-          TIMEOUT_COUNTER=0
-          SSH_URL=""
-          while [ -z "$SSH_URL" ] && [ $TIMEOUT_COUNTER -lt 15 ]; do
-            SSH_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' | grep ssh || true)
-            sleep 1
-            TIMEOUT_COUNTER=$((TIMEOUT_COUNTER+1))
+          cloudflared tunnel --url ssh://localhost:22 --logfile ssh_tunnel.log &
+          echo "Waiting for SSH tunnel URL..."
+          for i in $(seq 1 30); do
+            SSH_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ssh_tunnel.log 2>/dev/null | head -1)
+            [ -n "$SSH_URL" ] && break
+            sleep 2
           done
           
+          SSH_HOST=$(echo "$SSH_URL" | sed 's/https:\/\///')
+          
           echo "=========================================================="
-          echo "  Tmate SSH: $SSH_URL"
+          echo "  SSH via Cloudflare Tunnel"
+          echo "  Connect command:"
+          echo "  ssh -o ProxyCommand=\"cloudflared access ssh --hostname %h\" runner@$SSH_HOST"
+          echo "  Password: runner"
           echo "=========================================================="
 
       # ── 7. Run Famous People Processing ──────────────────────────────────────
