@@ -29,11 +29,16 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── 3. Install dependencies ──────────────────────────────────────────────
+      # ── 3. Install dependencies into venv ─────────────────────────────────────
       - name: Install dependencies
         run: |
+          python -m venv venv
+          source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          # Auto-activate venv on SSH login
+          echo 'source ${{ github.workspace }}/venv/bin/activate' >> ~/.bashrc
+          echo 'cd ${{ github.workspace }}' >> ~/.bashrc
 
       # ── 4. Install system dependencies ───────────────────────────────────────
       - name: Install system dependencies
@@ -58,6 +63,7 @@ jobs:
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          source venv/bin/activate
           # ── Setup SSH Server ───────────────────────────────────────────────
           sudo mkdir -p /var/run/sshd
           echo "runner:runner" | sudo chpasswd
