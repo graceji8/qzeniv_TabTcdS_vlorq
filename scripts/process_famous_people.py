@@ -91,9 +91,38 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     sf.write(ref_wav_path, extracted_data, samplerate)
     return True
 
-def generate_famous_people_with_ai():
+def generate_famous_people_with_ai(service=None):
+    import random
     print("Generating list of famous people using AI...")
-    prompt = "Generate a list of 5 famous people, including famous film actors, and a famous quote for each person. Format each line exactly as 'Name|Quote'. Do not include numbering or bullet points."
+    
+    avoid_list = []
+    if service:
+        try:
+            import upload_results
+            materials_id = upload_results.get_drive_folder_id(service, "materials")
+            if materials_id:
+                contents = upload_results.get_drive_folder_contents(service, materials_id)
+                for name, item in contents.items():
+                    if item.get("mimeType") == "application/vnd.google-apps.folder":
+                        avoid_list.append(name.replace("_", " "))
+        except Exception as e:
+            print(f"Could not fetch existing people to avoid: {e}")
+
+    prompt = (
+        f"Generate a completely random and diverse list of 5 famous politicians (past or present). "
+        f"Avoid always picking the most obvious choices (e.g. avoid Barack Obama, Donald Trump, etc. if possible). "
+    )
+    
+    if avoid_list:
+        # Pass up to 50 random names from the avoid list to keep the prompt size reasonable
+        avoid_sample = random.sample(avoid_list, min(len(avoid_list), 50))
+        avoid_str = ", ".join(avoid_sample)
+        prompt += f"EXTREMELY IMPORTANT: DO NOT include any of the following people as they have already been processed: {avoid_str}. "
+        
+    prompt += (
+        f"Provide a famous quote for each person. Format each line exactly as 'Name|Quote'. "
+        f"Do not include numbering, bullet points, or any other text."
+    )
     
     # Try OpenAI if key exists
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -105,7 +134,7 @@ def generate_famous_people_with_ai():
                 json={
                     "model": "gpt-4o",
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7
+                    "temperature": 0.9
                 }
             )
             data = response.json()
@@ -146,7 +175,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation.")
-        return generate_famous_people_with_ai()
+        return generate_famous_people_with_ai(None)
 
     # Always regenerate on forced rounds
     if not force_regenerate:
@@ -175,7 +204,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     # Generate fresh list with AI
     print("Generating fresh list with AI...")
-    people = generate_famous_people_with_ai()
+    people = generate_famous_people_with_ai(service)
 
     if people and service:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -325,7 +354,21 @@ def main():
                     downloaded = True
                     print(f"Downloaded from YouTube.")
                 else:
-                    print(f"YouTube failed:\n{result.stderr[-800:]}")  # show full error
+                    print(f"YouTube failed with primary config. Trying fallback to chromium cookies...")
+                    fallback_cmd = [
+                        "python", "-m", "yt_dlp",
+                        f"ytsearch1:{query}",
+                        "-x", "--audio-format", "wav",
+                        "-o", full_wav,
+                        "--no-playlist", "--retries", "3", "--socket-timeout", "30",
+                        "--cookies-from-browser", "chromium"
+                    ]
+                    result2 = subprocess.run(fallback_cmd, check=False, capture_output=True, text=True)
+                    if result2.returncode == 0 and os.path.exists(full_wav):
+                        downloaded = True
+                        print(f"Downloaded from YouTube (via Chromium fallback).")
+                    else:
+                        print(f"YouTube fallback failed:\n{result2.stderr[-800:]}")
 
                 # Try SoundCloud
                 if not downloaded:
