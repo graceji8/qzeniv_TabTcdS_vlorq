@@ -114,59 +114,59 @@ jobs:
         if: steps.gh_cache.outputs.cache-hit != 'true' || github.event.inputs.force_gdrive_restore == 'true'
         run: |
           source venv/bin/activate
-          python3 << 'PYEOF'
-import os, pickle, tarfile, tempfile
-from pathlib import Path
-
-HF_CACHE   = Path.home() / ".cache" / "huggingface"
-GD_FOLDER  = "OmniVoice-ModelCache"
-GD_FILE    = "omnivoice_model_weights.tar.gz"
-
-try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseDownload
-
-    with open('token.pickle', 'rb') as f:
-        creds = pickle.load(f)
-    service = build('drive', 'v3', credentials=creds)
-
-    results = service.files().list(
-        q=f"name='{GD_FILE}' and trashed=false",
-        fields="files(id, name, size, modifiedTime)",
-        orderBy="modifiedTime desc"
-    ).execute()
-
-    files = results.get('files', [])
-    if not files:
-        print(f"No model backup on Google Drive — will download from HuggingFace")
-    else:
-        f = files[0]
-        size_mb = int(f.get('size', 0)) / (1024*1024)
-        print(f"Found backup: {f['name']} ({size_mb:.0f} MB, modified {f['modifiedTime']})")
-        print("Downloading from Google Drive...")
-
-        request = service.files().get_media(fileId=f['id'])
-        tmp = Path(tempfile.gettempdir()) / GD_FILE
-        with open(tmp, 'wb') as fh:
-            dl = MediaIoBaseDownload(fh, request, chunksize=8*1024*1024)
-            done = False
-            while not done:
-                status, done = dl.next_chunk()
-                if status:
-                    print(f"  {int(status.progress()*100)}%", end='\r', flush=True)
-
-        print(f"\nExtracting {size_mb:.0f} MB...")
-        HF_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(tmp, 'r:gz') as tar:
-            tar.extractall(HF_CACHE.parent)
-        tmp.unlink()
-        print("Model weights restored from Google Drive ✓")
-
-except FileNotFoundError:
-    print("No token.pickle — skipping Google Drive restore")
-except Exception as e:
-    print(f"Google Drive restore failed (non-fatal): {e}")
-PYEOF
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
+          import os, pickle, tarfile, tempfile
+          from pathlib import Path
+          
+          HF_CACHE   = Path.home() / ".cache" / "huggingface"
+          GD_FOLDER  = "OmniVoice-ModelCache"
+          GD_FILE    = "omnivoice_model_weights.tar.gz"
+          
+          try:
+              from googleapiclient.discovery import build
+              from googleapiclient.http import MediaIoBaseDownload
+          
+              with open('token.pickle', 'rb') as f:
+                  creds = pickle.load(f)
+              service = build('drive', 'v3', credentials=creds)
+          
+              results = service.files().list(
+                  q=f"name='{GD_FILE}' and trashed=false",
+                  fields="files(id, name, size, modifiedTime)",
+                  orderBy="modifiedTime desc"
+              ).execute()
+          
+              files = results.get('files', [])
+              if not files:
+                  print(f"No model backup on Google Drive — will download from HuggingFace")
+              else:
+                  f = files[0]
+                  size_mb = int(f.get('size', 0)) / (1024*1024)
+                  print(f"Found backup: {f['name']} ({size_mb:.0f} MB, modified {f['modifiedTime']})")
+                  print("Downloading from Google Drive...")
+          
+                  request = service.files().get_media(fileId=f['id'])
+                  tmp = Path(tempfile.gettempdir()) / GD_FILE
+                  with open(tmp, 'wb') as fh:
+                      dl = MediaIoBaseDownload(fh, request, chunksize=8*1024*1024)
+                      done = False
+                      while not done:
+                          status, done = dl.next_chunk()
+                          if status:
+                              print(f"  {int(status.progress()*100)}%", end='\r', flush=True)
+          
+                  print(f"\nExtracting {size_mb:.0f} MB...")
+                  HF_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                  with tarfile.open(tmp, 'r:gz') as tar:
+                      tar.extractall(HF_CACHE.parent)
+                  tmp.unlink()
+                  print("Model weights restored from Google Drive ✓")
+          
+          except FileNotFoundError:
+              print("No token.pickle — skipping Google Drive restore")
+          except Exception as e:
+              print(f"Google Drive restore failed (non-fatal): {e}")
+          PYEOF
 
       # ── 10. Pull OmniVoice-Studio Docker image ────────────────────────────────
       - name: Pull OmniVoice-Studio Docker image
@@ -328,97 +328,97 @@ PYEOF
         if: always()
         run: |
           source venv/bin/activate
-          python3 << 'PYEOF'
-import os, pickle, tarfile, tempfile
-from pathlib import Path
-from datetime import datetime, timezone
-
-HF_CACHE  = Path.home() / ".cache" / "huggingface"
-GD_FOLDER = "OmniVoice-ModelCache"
-GD_FILE   = "omnivoice_model_weights.tar.gz"
-
-if not HF_CACHE.exists() or not any(HF_CACHE.rglob("*")):
-    print("No HuggingFace cache — model not downloaded this run, nothing to back up")
-    exit(0)
-
-total_bytes = sum(f.stat().st_size for f in HF_CACHE.rglob("*") if f.is_file())
-total_mb = total_bytes / (1024*1024)
-print(f"HF cache: {total_mb:.0f} MB")
-
-if total_mb < 50:
-    print("Cache too small — model likely not fully downloaded, skipping backup")
-    exit(0)
-
-try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-
-    with open('token.pickle', 'rb') as f:
-        creds = pickle.load(f)
-    service = build('drive', 'v3', credentials=creds)
-
-    # Get or create folder
-    q = f"name='{GD_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    res = service.files().list(q=q, fields="files(id)").execute()
-    if res['files']:
-        folder_id = res['files'][0]['id']
-    else:
-        folder_id = service.files().create(
-            body={'name': GD_FOLDER, 'mimeType': 'application/vnd.google-apps.folder'}
-        ).execute()['id']
-        print(f"Created Google Drive folder: {GD_FOLDER}")
-
-    # Check existing backup freshness
-    existing = service.files().list(
-        q=f"name='{GD_FILE}' and '{folder_id}' in parents and trashed=false",
-        fields="files(id, modifiedTime, size)",
-        orderBy="modifiedTime desc"
-    ).execute().get('files', [])
-
-    if existing:
-        mod_time = datetime.fromisoformat(existing[0]['modifiedTime'].replace('Z', '+00:00'))
-        age_days = (datetime.now(timezone.utc) - mod_time).days
-        existing_mb = int(existing[0].get('size', 0)) / (1024*1024)
-        print(f"Existing backup: {existing_mb:.0f} MB compressed, {age_days} days old")
-        size_diff_pct = abs(existing_mb * 3 - total_mb) / max(total_mb, 1)  # rough 3x compression
-        if age_days < 7 and size_diff_pct < 0.15:
-            print("Backup is fresh and same approximate size — skipping re-upload ✓")
-            exit(0)
-        print(f"Backup stale or changed — re-uploading")
-
-    # Compress
-    tmp = Path(tempfile.gettempdir()) / GD_FILE
-    print(f"Compressing {total_mb:.0f} MB (level 6)...")
-    with tarfile.open(tmp, 'w:gz', compresslevel=6) as tar:
-        tar.add(HF_CACHE, arcname="huggingface")
-    compressed_mb = tmp.stat().st_size / (1024*1024)
-    print(f"Compressed → {compressed_mb:.0f} MB — uploading to Google Drive...")
-
-    # Delete old backup
-    for old in existing:
-        service.files().delete(fileId=old['id']).execute()
-
-    # Resumable upload (important for large files)
-    media = MediaFileUpload(str(tmp), mimetype='application/gzip',
-                            chunksize=8*1024*1024, resumable=True)
-    req = service.files().create(
-        body={'name': GD_FILE, 'parents': [folder_id]},
-        media_body=media, fields='id'
-    )
-    response = None
-    while response is None:
-        status, response = req.next_chunk()
-        if status:
-            print(f"  {int(status.progress()*100)}%", end='\r', flush=True)
-
-    tmp.unlink()
-    print(f"\nModel weights backed up to Google Drive ✓  ({compressed_mb:.0f} MB compressed)")
-
-except FileNotFoundError:
-    print("No token.pickle — skipping")
-except Exception as e:
-    print(f"Backup failed (non-fatal): {e}")
-PYEOF
+          python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
+          import os, pickle, tarfile, tempfile
+          from pathlib import Path
+          from datetime import datetime, timezone
+          
+          HF_CACHE  = Path.home() / ".cache" / "huggingface"
+          GD_FOLDER = "OmniVoice-ModelCache"
+          GD_FILE   = "omnivoice_model_weights.tar.gz"
+          
+          if not HF_CACHE.exists() or not any(HF_CACHE.rglob("*")):
+              print("No HuggingFace cache — model not downloaded this run, nothing to back up")
+              exit(0)
+          
+          total_bytes = sum(f.stat().st_size for f in HF_CACHE.rglob("*") if f.is_file())
+          total_mb = total_bytes / (1024*1024)
+          print(f"HF cache: {total_mb:.0f} MB")
+          
+          if total_mb < 50:
+              print("Cache too small — model likely not fully downloaded, skipping backup")
+              exit(0)
+          
+          try:
+              from googleapiclient.discovery import build
+              from googleapiclient.http import MediaFileUpload
+          
+              with open('token.pickle', 'rb') as f:
+                  creds = pickle.load(f)
+              service = build('drive', 'v3', credentials=creds)
+          
+              # Get or create folder
+              q = f"name='{GD_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+              res = service.files().list(q=q, fields="files(id)").execute()
+              if res['files']:
+                  folder_id = res['files'][0]['id']
+              else:
+                  folder_id = service.files().create(
+                      body={'name': GD_FOLDER, 'mimeType': 'application/vnd.google-apps.folder'}
+                  ).execute()['id']
+                  print(f"Created Google Drive folder: {GD_FOLDER}")
+          
+              # Check existing backup freshness
+              existing = service.files().list(
+                  q=f"name='{GD_FILE}' and '{folder_id}' in parents and trashed=false",
+                  fields="files(id, modifiedTime, size)",
+                  orderBy="modifiedTime desc"
+              ).execute().get('files', [])
+          
+              if existing:
+                  mod_time = datetime.fromisoformat(existing[0]['modifiedTime'].replace('Z', '+00:00'))
+                  age_days = (datetime.now(timezone.utc) - mod_time).days
+                  existing_mb = int(existing[0].get('size', 0)) / (1024*1024)
+                  print(f"Existing backup: {existing_mb:.0f} MB compressed, {age_days} days old")
+                  size_diff_pct = abs(existing_mb * 3 - total_mb) / max(total_mb, 1)  # rough 3x compression
+                  if age_days < 7 and size_diff_pct < 0.15:
+                      print("Backup is fresh and same approximate size — skipping re-upload ✓")
+                      exit(0)
+                  print(f"Backup stale or changed — re-uploading")
+          
+              # Compress
+              tmp = Path(tempfile.gettempdir()) / GD_FILE
+              print(f"Compressing {total_mb:.0f} MB (level 6)...")
+              with tarfile.open(tmp, 'w:gz', compresslevel=6) as tar:
+                  tar.add(HF_CACHE, arcname="huggingface")
+              compressed_mb = tmp.stat().st_size / (1024*1024)
+              print(f"Compressed → {compressed_mb:.0f} MB — uploading to Google Drive...")
+          
+              # Delete old backup
+              for old in existing:
+                  service.files().delete(fileId=old['id']).execute()
+          
+              # Resumable upload (important for large files)
+              media = MediaFileUpload(str(tmp), mimetype='application/gzip',
+                                      chunksize=8*1024*1024, resumable=True)
+              req = service.files().create(
+                  body={'name': GD_FILE, 'parents': [folder_id]},
+                  media_body=media, fields='id'
+              )
+              response = None
+              while response is None:
+                  status, response = req.next_chunk()
+                  if status:
+                      print(f"  {int(status.progress()*100)}%", end='\r', flush=True)
+          
+              tmp.unlink()
+              print(f"\nModel weights backed up to Google Drive ✓  ({compressed_mb:.0f} MB compressed)")
+          
+          except FileNotFoundError:
+              print("No token.pickle — skipping")
+          except Exception as e:
+              print(f"Backup failed (non-fatal): {e}")
+          PYEOF
 
       # ── 17. Upload generated outputs → Google Drive ───────────────────────────
       # Folder structure: OmniVoice-Outputs / YYYY-MM-DD_HHMM_runID / ...
@@ -434,79 +434,79 @@ PYEOF
           fi
 
           source venv/bin/activate
-          GITHUB_RUN_ID="${{ github.run_id }}" python3 << 'PYEOF'
-import os, glob, pickle
-from pathlib import Path
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from datetime import datetime, timezone
-
-try:
-    with open('token.pickle', 'rb') as f:
-        creds = pickle.load(f)
-    service = build('drive', 'v3', credentials=creds)
-
-    run_id   = os.environ.get('GITHUB_RUN_ID', 'unknown')
-    date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M')
-    session  = f"{date_str}_{run_id}"
-
-    def get_or_create(name, parent=None):
-        q = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        if parent:
-            q += f" and '{parent}' in parents"
-        r = service.files().list(q=q, fields="files(id)").execute()
-        if r['files']:
-            return r['files'][0]['id']
-        body = {'name': name, 'mimeType': 'application/vnd.google-apps.folder'}
-        if parent:
-            body['parents'] = [parent]
-        return service.files().create(body=body).execute()['id']
-
-    root_id    = get_or_create('OmniVoice-Outputs')
-    session_id = get_or_create(session, root_id)
-
-    ALLOWED = {'.wav','audio/wav'}, {'.mp4','video/mp4'}, \
-              {'.srt','text/plain'}, {'.vtt','text/vtt'}, \
-              {'.json','application/json'}, {'.log','text/plain'}
-    MIME = {'.wav':'audio/wav','.mp4':'video/mp4','.srt':'text/plain',
-            '.vtt':'text/vtt','.json':'application/json','.log':'text/plain',
-            '.db':'application/octet-stream'}
-    ALLOWED_EXT = set(MIME.keys())
-
-    uploaded = 0
-    for fpath in sorted(glob.glob('omnivoice_outputs/**/*', recursive=True)):
-        if not os.path.isfile(fpath):
-            continue
-        ext = Path(fpath).suffix.lower()
-        if ext not in ALLOWED_EXT:
-            continue
-        size_mb = os.path.getsize(fpath) / (1024*1024)
-        if size_mb > 500:
-            print(f"  SKIP (too large): {fpath} ({size_mb:.0f} MB)")
-            continue
-
-        rel   = os.path.relpath(fpath, 'omnivoice_outputs')
-        parts = Path(rel).parts
-        parent = session_id
-        for part in parts[:-1]:
-            parent = get_or_create(part, parent)
-
-        media = MediaFileUpload(fpath, mimetype=MIME.get(ext, 'application/octet-stream'),
-                                resumable=size_mb > 5)
-        service.files().create(
-            body={'name': parts[-1], 'parents': [parent]},
-            media_body=media
-        ).execute()
-        print(f"  ✓ {rel}  ({size_mb:.1f} MB)")
-        uploaded += 1
-
-    print(f"\nUploaded {uploaded} files → Google Drive/OmniVoice-Outputs/{session}")
-
-except FileNotFoundError:
-    print("No token.pickle — skipping")
-except Exception as e:
-    print(f"Output upload failed (non-fatal): {e}")
-PYEOF
+          GITHUB_RUN_ID="${{ github.run_id }}" python3 -c "import sys, textwrap; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
+          import os, glob, pickle
+          from pathlib import Path
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+          from datetime import datetime, timezone
+          
+          try:
+              with open('token.pickle', 'rb') as f:
+                  creds = pickle.load(f)
+              service = build('drive', 'v3', credentials=creds)
+          
+              run_id   = os.environ.get('GITHUB_RUN_ID', 'unknown')
+              date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M')
+              session  = f"{date_str}_{run_id}"
+          
+              def get_or_create(name, parent=None):
+                  q = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                  if parent:
+                      q += f" and '{parent}' in parents"
+                  r = service.files().list(q=q, fields="files(id)").execute()
+                  if r['files']:
+                      return r['files'][0]['id']
+                  body = {'name': name, 'mimeType': 'application/vnd.google-apps.folder'}
+                  if parent:
+                      body['parents'] = [parent]
+                  return service.files().create(body=body).execute()['id']
+          
+              root_id    = get_or_create('OmniVoice-Outputs')
+              session_id = get_or_create(session, root_id)
+          
+              ALLOWED = {'.wav','audio/wav'}, {'.mp4','video/mp4'}, \
+                        {'.srt','text/plain'}, {'.vtt','text/vtt'}, \
+                        {'.json','application/json'}, {'.log','text/plain'}
+              MIME = {'.wav':'audio/wav','.mp4':'video/mp4','.srt':'text/plain',
+                      '.vtt':'text/vtt','.json':'application/json','.log':'text/plain',
+                      '.db':'application/octet-stream'}
+              ALLOWED_EXT = set(MIME.keys())
+          
+              uploaded = 0
+              for fpath in sorted(glob.glob('omnivoice_outputs/**/*', recursive=True)):
+                  if not os.path.isfile(fpath):
+                      continue
+                  ext = Path(fpath).suffix.lower()
+                  if ext not in ALLOWED_EXT:
+                      continue
+                  size_mb = os.path.getsize(fpath) / (1024*1024)
+                  if size_mb > 500:
+                      print(f"  SKIP (too large): {fpath} ({size_mb:.0f} MB)")
+                      continue
+          
+                  rel   = os.path.relpath(fpath, 'omnivoice_outputs')
+                  parts = Path(rel).parts
+                  parent = session_id
+                  for part in parts[:-1]:
+                      parent = get_or_create(part, parent)
+          
+                  media = MediaFileUpload(fpath, mimetype=MIME.get(ext, 'application/octet-stream'),
+                                          resumable=size_mb > 5)
+                  service.files().create(
+                      body={'name': parts[-1], 'parents': [parent]},
+                      media_body=media
+                  ).execute()
+                  print(f"  ✓ {rel}  ({size_mb:.1f} MB)")
+                  uploaded += 1
+          
+              print(f"\nUploaded {uploaded} files → Google Drive/OmniVoice-Outputs/{session}")
+          
+          except FileNotFoundError:
+              print("No token.pickle — skipping")
+          except Exception as e:
+              print(f"Output upload failed (non-fatal): {e}")
+          PYEOF
 
       # ── 18. Cleanup & deregister ──────────────────────────────────────────────
       - name: Cleanup
