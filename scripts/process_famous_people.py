@@ -20,11 +20,12 @@ huggingface_hub.logging.set_verbosity_error()
 
 def _is_valid_cookies_file(path):
     try:
-        if not os.path.exists(path):
+        if not os.path.exists(path) or os.path.getsize(path) < 10:
             return False
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            first_line = f.readline().strip()
-        return 'Netscape HTTP Cookie File' in first_line
+            content = f.read().lower()
+        # Accept if it looks like it has youtube/google cookies, or just has reasonable size
+        return 'youtube' in content or 'google' in content or '.com' in content
     except Exception:
         return False
 
@@ -542,6 +543,7 @@ def main():
                         "--download-sections", "*0:00-0:30",
                         "--max-downloads", "1",
                         "--match-filter", "title !~= '(?i)music|song|lyric|official video|remix|cover|karaoke' & description !~= '(?i)provided to youtube'",
+                        "--extractor-args", "youtube:player_client=android,web"
                     ]
                     is_youtube = search_prefix.startswith("ytsearch")
                     if is_youtube:
