@@ -1,7 +1,7 @@
 omnivoice
 torch
 torchaudio
-requests
+requests[socks]
 google-api-python-client
 google-auth
 google-auth-httplib2
