@@ -61,7 +61,7 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     else:
         wav_16k = wav
         
-    speech_timestamps = get_speech_timestamps(wav_16k, model, sampling_rate=16000)
+    speech_timestamps = get_speech_timestamps(wav_16k, model, sampling_rate=16000, threshold=0.65)
     
     if not speech_timestamps:
         print("No speech detected by AI.")
@@ -128,6 +128,7 @@ def generate_famous_people_with_ai(service=None):
     # Try GitHub Models if GH_MODELS_TOKEN or GITHUB_TOKEN exists
     github_token = os.environ.get("GH_MODELS_TOKEN") or os.environ.get("GIT_MODEL_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if github_token:
+        print(f"DEBUG: github_token detected (length: {len(github_token)})")
         try:
             response = requests.post(
                 "https://models.inference.ai.azure.com/chat/completions",
@@ -140,6 +141,7 @@ def generate_famous_people_with_ai(service=None):
                 timeout=30
             )
             if response.status_code == 200:
+                print("DEBUG: GitHub Models API success!")
                 data = response.json()
                 content = data['choices'][0]['message']['content']
                 return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
@@ -147,10 +149,13 @@ def generate_famous_people_with_ai(service=None):
                 print(f"GitHub Models API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"GitHub Models generation failed: {e}")
+    else:
+        print("DEBUG: No github_token found in environment.")
 
     # Try Cloudflare Workers AI if CLOUDFLARE_ACCOUNTS_JSON exists
     cf_accounts_env = os.environ.get("CLOUDFLARE_ACCOUNTS_JSON")
     if cf_accounts_env:
+        print("DEBUG: CLOUDFLARE_ACCOUNTS_JSON detected.")
         try:
             import json
             import random
@@ -172,6 +177,7 @@ def generate_famous_people_with_ai(service=None):
                 if response.status_code == 200:
                     data = response.json()
                     if data.get("success"):
+                        print("DEBUG: Cloudflare AI success!")
                         content = data["result"]["response"]
                         return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
                     else:
@@ -180,10 +186,13 @@ def generate_famous_people_with_ai(service=None):
                     print(f"Cloudflare API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Cloudflare AI exception: {e}")
+    else:
+        print("DEBUG: No CLOUDFLARE_ACCOUNTS_JSON found.")
 
     # Try OpenAI if OPENAI_API_KEY exists
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
+        print(f"DEBUG: OPENAI_API_KEY detected (length: {len(api_key)})")
         try:
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -196,6 +205,7 @@ def generate_famous_people_with_ai(service=None):
                 timeout=30
             )
             if response.status_code == 200:
+                print("DEBUG: OpenAI API success!")
                 data = response.json()
                 content = data['choices'][0]['message']['content']
                 return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
@@ -203,6 +213,8 @@ def generate_famous_people_with_ai(service=None):
                 print(f"OpenAI API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"OpenAI generation failed: {e}")
+    else:
+        print("DEBUG: No OPENAI_API_KEY found.")
             
     # Try local Ollama
     try:
@@ -219,21 +231,73 @@ def generate_famous_people_with_ai(service=None):
             content = response.json().get("response", "")
             return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
     except Exception as e:
-        # Don't print Ollama error in CI, it's expected to fail
-        if 'GITHUB_ACTIONS' not in os.environ:
+        # Don't print Ollama connection errors in CI or if it's clearly not there
+        is_conn_error = any(msg in str(e).lower() for msg in ["connection refused", "failed to establish a new connection"])
+        if 'GITHUB_ACTIONS' not in os.environ and not is_conn_error:
             print(f"Ollama generation failed: {e}")
+        elif is_conn_error:
+            # Quietly note that local AI is unavailable
+            pass
         
     print("AI generation failed for this round. Using fallback list.")
     # Add a small delay if AI fails to prevent rapid looping
-    time.sleep(10)
+    time.sleep(5)
     
-    return [
+    fallback = [
         "Joe Biden|The future belongs to those who believe in the beauty of their dreams.",
         "Rishi Sunak|Integrity and professionalism are my top priorities.",
         "Justin Trudeau|Diversity is our strength.",
         "Narendra Modi|Individual effort can make a big difference.",
-        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here."
+        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here.",
+        "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.",
+        "Bill Gates|Success is a lousy teacher. It seduces smart people into thinking they can't lose.",
+        "Jeff Bezos|Your brand is what other people say about you when you're not in the room.",
+        "Mark Zuckerberg|The biggest risk is not taking any risk.",
+        "Tim Cook|Life is fragile. We’re not guaranteed a tomorrow so give it everything you've got.",
+        "Pope Francis|A little bit of mercy makes the world less cold and more just.",
+        "Dalai Lama|Happiness is not something ready made. It comes from your own actions.",
+        "Malala Yousafzai|One child, one teacher, one book, one pen can change the world.",
+        "Greta Thunberg|I want you to act as if our house is on fire. Because it is.",
+        "Lionel Messi|You have to fight to reach your dream. You have to sacrifice and work hard for it.",
+        "Cristiano Ronaldo|Your love makes me strong, your hate makes me unstoppable.",
+        "LeBron James|You can't be afraid to fail. It's the only way you succeed.",
+        "Stephen Curry|Success is not a destination, it's a journey.",
+        "Lewis Hamilton|I feel like people are expecting me to fail, therefore I expect myself to win.",
+        "Serena Williams|I really think a champion is defined not by their wins but by how they can recover when they fall.",
+        "Taylor Swift|No matter what happens in life, be good to people. Being good to people is a wonderful legacy to leave behind.",
+        "Beyonce|I don't like to gamble, but if there's one thing I'm willing to bet on, it's myself.",
+        "Rihanna|It's important to keep your head held high and your heart even higher.",
+        "Adele|I don't make music for eyes. I make music for ears.",
+        "Ed Sheeran|Be a true heart, not a follower.",
+        "Drake|Tables turn, bridges burn, you live and learn.",
+        "Kanye West|I am my own biggest fan.",
+        "Lady Gaga|Don't you ever let a soul in the world tell you that you can't be exactly who you are.",
+        "Bruno Mars|I just want to make music and have a good time.",
+        "Justin Bieber|I want my world to be fun.",
+        "Tom Hanks|I've made a lot of movies and some of them were even good.",
+        "Meryl Streep|The great gift of human beings is that we have the power of empathy.",
+        "Leonardo DiCaprio|If you can do what you do best and be happy, you're further along in life than most people.",
+        "Brad Pitt|I'm one of those people you hate because of genetics. It's the truth.",
+        "Angelina Jolie|Every day we choose who we are by how we define ourselves.",
+        "Robert Downey Jr.|I know who I am. I'm the dude playin' the dude, disguised as another dude!",
+        "Scarlett Johansson|I'm not going to apologize for being successful.",
+        "Will Smith|If you're not making someone else's life better, then you're wasting your time.",
+        "Dwayne Johnson|Success at anything will always come down to this: focus and effort.",
+        "Oprah Winfrey|The biggest adventure you can take is to live the life of your dreams.",
+        "Ellen DeGeneres|Be kind to one another.",
+        "David Attenborough|It seems to me that the natural world is the greatest source of excitement.",
+        "Michelle Obama|Success isn't about how much money you make; it's about the difference you make in people's lives.",
+        "Hillary Clinton|Women are the largest untapped reservoir of talent in the world.",
+        "Angela Merkel|Fear was never a good adviser, neither in our personal lives nor in our society.",
+        "Emmanuel Macron|Make our planet great again.",
+        "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.",
+        "Keir Starmer|Country first, party second.",
+        "Olaf Scholz|We are living through a watershed era.",
+        "Xi Jinping|The people's aspirations for a better life are what we must fight for."
     ]
+    
+    random.shuffle(fallback)
+    return fallback[:10]
 
 # 1. Get the famous people list from Google Drive or Generate it
 def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate=False):
@@ -460,10 +524,15 @@ def main():
 
                 # Download
                 print(f"Downloading audio for {person}...")
-                query = f"{person} speaking speech"
+                query = f"{person} speaking interview speech -music -song"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
                 def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
+                    # Increase search depth to allow for filtering
+                    prefix_base = search_prefix.split(":")[0]
+                    if prefix_base.endswith("search"):
+                        search_prefix = f"{prefix_base}5:"
+
                     cmd = [
                         "python", "-m", "yt_dlp",
                         f"{search_prefix}{_query}",
@@ -471,6 +540,8 @@ def main():
                         "-o", _full_wav,
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
                         "--download-sections", "*0:00-0:30",
+                        "--max-downloads", "1",
+                        "--match-filter", "title !~= '(?i)music|song|lyric|official video|remix|cover|karaoke' & description !~= '(?i)provided to youtube'",
                     ]
                     is_youtube = search_prefix.startswith("ytsearch")
                     if is_youtube:
@@ -481,15 +552,8 @@ def main():
 
                 downloaded = False
                 
-                # Try SoundCloud first (no auth needed)
-                print("Trying SoundCloud...")
-                result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
-                if result.returncode == 0 and os.path.exists(full_wav):
-                    downloaded = True
-                    print(f"Downloaded from SoundCloud.")
-
-                # Try YouTube with cookies if SoundCloud failed
-                if not downloaded and _is_valid_cookies_file(cookies_file):
+                # Try YouTube with cookies first
+                if _is_valid_cookies_file(cookies_file):
                     print("Trying YouTube with cookies...")
                     result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
@@ -498,7 +562,7 @@ def main():
                     else:
                         print(f"YouTube with cookies failed:\n{result.stderr[-500:]}")
 
-                # Try YouTube without cookies as last resort
+                # Try YouTube without cookies
                 if not downloaded:
                     print("Trying YouTube without cookies...")
                     result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
@@ -507,6 +571,16 @@ def main():
                         print(f"Downloaded from YouTube (no cookies).")
                     else:
                         print(f"YouTube without cookies failed:\n{result.stderr[-500:]}")
+
+                # Try SoundCloud as last resort
+                if not downloaded:
+                    print("Trying SoundCloud...")
+                    result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
+                    if result.returncode == 0 and os.path.exists(full_wav):
+                        downloaded = True
+                        print(f"Downloaded from SoundCloud.")
+                    else:
+                        print(f"SoundCloud failed:\n{result.stderr[-500:]}")
 
 
                 if not downloaded:
