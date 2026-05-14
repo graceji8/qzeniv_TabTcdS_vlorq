@@ -188,7 +188,7 @@ jobs:
             echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
             chmod 600 ~/.ssh/id_rsa
             # Start SSH SOCKS proxy in background (-f = background, -N = no command, -D = dynamic forwarding)
-            ssh -o StrictHostKeyChecking=no -f -N -D 1080 -p 168 admin@192.168.1.176
+            ssh -o StrictHostKeyChecking=no -f -N -D 1080 -p 168 admin@100.86.43.65
             echo "SSH SOCKS proxy started on port 1080"
             echo "YTDLP_PROXY=socks5://127.0.0.1:1080" >> $GITHUB_ENV
           else
