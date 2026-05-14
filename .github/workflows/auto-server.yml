@@ -167,6 +167,11 @@ jobs:
           echo "=========================================================="
 
       # ── 6c. Connect Tailscale ────────────────────────────────────────────────
+      - name: Upgrade Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale version: $(tailscale version)"
+
       - name: Connect Tailscale
         uses: tailscale/github-action@v2
         with:
