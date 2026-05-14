@@ -166,6 +166,30 @@ jobs:
           echo "  Password: runner"
           echo "=========================================================="
 
+      # ── 6c. Connect Tailscale ────────────────────────────────────────────────
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-client-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-routes
+
+      # ── 6d. Setup Home Proxy via SSH ─────────────────────────────────────────
+      - name: Setup Home Proxy via SSH
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            # Start SSH SOCKS proxy in background (-f = background, -N = no command, -D = dynamic forwarding)
+            ssh -o StrictHostKeyChecking=no -f -N -D 1080 -p 168 admin@192.168.1.176
+            echo "SSH SOCKS proxy started on port 1080"
+            echo "YTDLP_PROXY=socks5://127.0.0.1:1080" >> $GITHUB_ENV
+          else
+            echo "WARNING: No SSH_PRIVATE_KEY secret found. Skipping home proxy setup."
+          fi
+
       # ── 7. Run Famous People Processing ──────────────────────────────────────
       - name: Run process_famous_people.py
         env:

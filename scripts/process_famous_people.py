@@ -550,6 +550,9 @@ def main():
                         cmd += ["--js-runtimes", "nodejs"]
                     if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
                         cmd += ["--cookies", _cookies_file]
+                    proxy = os.environ.get("YTDLP_PROXY")
+                    if proxy:
+                        cmd += ["--proxy", proxy]
                     return cmd
 
                 downloaded = False
