@@ -300,18 +300,32 @@ jobs:
           OMNIVOICE_API_URL: http://localhost:8000
           DISPLAY: ':99'
         run: |
+          # Make the secrets available to SSH interactive shells
+          cat << EOF >> ~/.bashrc
+          export OPENAI_API_KEY="${OPENAI_API_KEY}"
+          export HF_TOKEN="${HF_TOKEN}"
+          export GH_MODELS_TOKEN="${GH_MODELS_TOKEN}"
+          export CLOUDFLARE_ACCOUNTS_JSON='${CLOUDFLARE_ACCOUNTS_JSON}'
+          export OMNIVOICE_API_URL="http://localhost:8000"
+          export DISPLAY=":99"
+          EOF
+
           source venv/bin/activate
           mkdir -p logs
 
           [ ! -f /tmp/.X99-lock ] && Xvfb :99 -screen 0 1920x1080x24 & sleep 2
 
-          if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
-            echo "Debug mode — sleeping 6h"
-            echo "OmniVoice UI: $UI_URL"
-            sleep 21600
-          else
-            python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
-          fi
+          python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
+
+      # ── 15. Keep Server Alive ───────────────────────────────────────────────
+      - name: Keep Server Alive
+        run: |
+          echo "============================================================"
+          echo "  Server is now waiting indefinitely."
+          echo "  You can access the OmniVoice UI and SSH into the runner."
+          echo "  Sleeping for up to 6 hours..."
+          echo "============================================================"
+          sleep 21600
 
       # ── 15. Show container logs on failure ───────────────────────────────────
       - name: Show container logs (on failure)

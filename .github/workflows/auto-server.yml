@@ -58,7 +58,8 @@ jobs:
       - name: Write YouTube cookies
         run: |
           if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
-            echo "${{ secrets.YOUTUBE_COOKIES }}" > scripts/cookies.txt
+            echo "# Netscape HTTP Cookie File" > scripts/cookies.txt
+            echo "${{ secrets.YOUTUBE_COOKIES }}" >> scripts/cookies.txt
             echo "cookies.txt written ($(wc -l < scripts/cookies.txt) lines)"
           else
             echo "No YOUTUBE_COOKIES secret found — YouTube will be skipped, SoundCloud only"
@@ -175,11 +176,11 @@ jobs:
           DISPLAY: ':99'
         run: |
           # Make the secrets available to SSH interactive shells
-          cat << 'EOF' >> ~/.bashrc
-          export OPENAI_API_KEY="$OPENAI_API_KEY"
-          export HF_TOKEN="$HF_TOKEN"
-          export GH_MODELS_TOKEN="$GH_MODELS_TOKEN"
-          export CLOUDFLARE_ACCOUNTS_JSON="$CLOUDFLARE_ACCOUNTS_JSON"
+          cat << EOF >> ~/.bashrc
+          export OPENAI_API_KEY="${OPENAI_API_KEY}"
+          export HF_TOKEN="${HF_TOKEN}"
+          export GH_MODELS_TOKEN="${GH_MODELS_TOKEN}"
+          export CLOUDFLARE_ACCOUNTS_JSON='${CLOUDFLARE_ACCOUNTS_JSON}'
           export DISPLAY=":99"
           EOF
 

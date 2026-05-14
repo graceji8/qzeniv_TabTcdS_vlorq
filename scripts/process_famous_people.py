@@ -525,10 +525,10 @@ def main():
 
                 # Download
                 print(f"Downloading audio for {person}...")
-                query = f"{person} speaking interview speech -music -song"
+                query = f"{person} speaking speech"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
-                def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
+                def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, player_client="ios,tv"):
                     # Increase search depth to allow for filtering
                     prefix_base = search_prefix.split(":")[0]
                     if prefix_base.endswith("search"):
@@ -542,8 +542,8 @@ def main():
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
                         "--download-sections", "*0:00-0:30",
                         "--max-downloads", "1",
-                        "--match-filter", "title !~= '(?i)music|song|lyric|official video|remix|cover|karaoke' & description !~= '(?i)provided to youtube'",
-                        "--extractor-args", "youtube:player_client=android,web"
+                        "--match-filter", "title !~= '(?i)music|song|lyric|remix|cover|karaoke'",
+                        "--extractor-args", f"youtube:player_client={player_client}"
                     ]
                     is_youtube = search_prefix.startswith("ytsearch")
                     if is_youtube:
@@ -556,28 +556,43 @@ def main():
                 
                 # Try YouTube with cookies first
                 if _is_valid_cookies_file(cookies_file):
-                    print("Trying YouTube with cookies...")
-                    result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True), check=False, capture_output=True, text=True)
+                    print("Trying YouTube with cookies (ios,tv)...")
+                    result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True, player_client="ios,tv"), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print(f"Downloaded from YouTube (with cookies).")
+                        print("Downloaded from YouTube (with cookies, ios/tv).")
                     else:
-                        print(f"YouTube with cookies failed:\n{result.stderr[-500:]}")
+                        print(f"YouTube with cookies (ios,tv) failed:\n{result.stderr[-300:]}")
+                        print("Trying YouTube with cookies (android,web)...")
+                        result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True, player_client="android,web"), check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print("Downloaded from YouTube (with cookies, android/web).")
+                        else:
+                            print(f"YouTube with cookies (android,web) failed:\n{result.stderr[-300:]}")
 
                 # Try YouTube without cookies
                 if not downloaded:
-                    print("Trying YouTube without cookies...")
-                    result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
+                    print("Trying YouTube without cookies (ios,tv)...")
+                    result = subprocess.run(build_cmd("ytsearch1:", player_client="ios,tv"), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print(f"Downloaded from YouTube (no cookies).")
+                        print("Downloaded from YouTube (no cookies, ios/tv).")
                     else:
-                        print(f"YouTube without cookies failed:\n{result.stderr[-500:]}")
+                        print(f"YouTube without cookies (ios,tv) failed:\n{result.stderr[-300:]}")
+                        print("Trying YouTube without cookies (android,web)...")
+                        result = subprocess.run(build_cmd("ytsearch1:", player_client="android,web"), check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print("Downloaded from YouTube (no cookies, android/web).")
+                        else:
+                            print(f"YouTube without cookies (android,web) failed:\n{result.stderr[-300:]}")
 
                 # Try SoundCloud as last resort
                 if not downloaded:
                     print("Trying SoundCloud...")
-                    result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
+                    sc_cmd = build_cmd("scsearch3:", _query=f"{person} speech")
+                    result = subprocess.run(sc_cmd, check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
                         print(f"Downloaded from SoundCloud.")
