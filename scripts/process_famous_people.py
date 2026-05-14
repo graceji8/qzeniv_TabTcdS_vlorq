@@ -1,4 +1,10 @@
 import os
+
+# Use home IP via SSH SOCKS proxy
+os.environ["YTDLP_PROXY"] = "socks5://127.0.0.1:1080"
+os.environ["http_proxy"] = "socks5h://127.0.0.1:1080"
+os.environ["https_proxy"] = "socks5h://127.0.0.1:1080"
+
 import time
 import subprocess
 import soundfile as sf
