@@ -174,6 +174,15 @@ jobs:
           CLOUDFLARE_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_ACCOUNTS_JSON }}
           DISPLAY: ':99'
         run: |
+          # Make the secrets available to SSH interactive shells
+          cat << 'EOF' >> ~/.bashrc
+          export OPENAI_API_KEY="$OPENAI_API_KEY"
+          export HF_TOKEN="$HF_TOKEN"
+          export GH_MODELS_TOKEN="$GH_MODELS_TOKEN"
+          export CLOUDFLARE_ACCOUNTS_JSON="$CLOUDFLARE_ACCOUNTS_JSON"
+          export DISPLAY=":99"
+          EOF
+
           source venv/bin/activate
           mkdir -p logs
 

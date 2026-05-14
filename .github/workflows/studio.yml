@@ -192,6 +192,7 @@ jobs:
             -v omnivoice-data:/app/omnivoice_data \
             -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
             -e HF_TOKEN="${{ secrets.HF_TOKEN }}" \
+            -e PYTHONPATH=/app/backend \
             -e OMNIVOICE_TTS_BACKEND=omnivoice \
             ghcr.io/debpalash/omnivoice-studio:latest
 
