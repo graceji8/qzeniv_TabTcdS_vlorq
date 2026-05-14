@@ -171,7 +171,7 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-client-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           args: --accept-routes
 
@@ -223,6 +223,13 @@ jobs:
           else
             python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
           fi
+
+      # ── 7b. Keep alive for debugging on failure ──────────────────────────────
+      - name: Keep alive for debugging on failure
+        if: failure() && github.event.inputs.debug_mode == 'true'
+        run: |
+          echo "Workflow failed in debug mode. Keeping runner alive for 6 hours..."
+          sleep 21600
 
       # ── 8. Deregister tunnel URL on completion ────────────────────────────────
       - name: Deregister tunnel
