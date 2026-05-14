@@ -136,11 +136,15 @@ def generate_famous_people_with_ai(service=None):
                     "model": "gpt-4o",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.9
-                }
+                },
+                timeout=30
             )
-            data = response.json()
-            content = data['choices'][0]['message']['content']
-            return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+            if response.status_code == 200:
+                data = response.json()
+                content = data['choices'][0]['message']['content']
+                return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+            else:
+                print(f"GitHub Models API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"GitHub Models generation failed: {e}")
 
@@ -162,14 +166,18 @@ def generate_famous_people_with_ai(service=None):
                 response = requests.post(
                     f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/meta/llama-3-8b-instruct",
                     headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
-                    json={"messages": [{"role": "user", "content": prompt}]}
+                    json={"messages": [{"role": "user", "content": prompt}]},
+                    timeout=30
                 )
-                data = response.json()
-                if data.get("success"):
-                    content = data["result"]["response"]
-                    return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("success"):
+                        content = data["result"]["response"]
+                        return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                    else:
+                        print(f"Cloudflare AI failed: {data.get('errors')}")
                 else:
-                    print(f"Cloudflare AI failed: {data.get('errors')}")
+                    print(f"Cloudflare API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Cloudflare AI exception: {e}")
 
@@ -184,11 +192,15 @@ def generate_famous_people_with_ai(service=None):
                     "model": "gpt-4o",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.9
-                }
+                },
+                timeout=30
             )
-            data = response.json()
-            content = data['choices'][0]['message']['content']
-            return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+            if response.status_code == 200:
+                data = response.json()
+                content = data['choices'][0]['message']['content']
+                return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+            else:
+                print(f"OpenAI API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"OpenAI generation failed: {e}")
             
@@ -200,21 +212,27 @@ def generate_famous_people_with_ai(service=None):
                 "model": "llama3",
                 "prompt": prompt,
                 "stream": False
-            }
+            },
+            timeout=5
         )
         if response.status_code == 200:
             content = response.json().get("response", "")
             return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
     except Exception as e:
-        print(f"Ollama generation failed: {e}")
+        # Don't print Ollama error in CI, it's expected to fail
+        if 'GITHUB_ACTIONS' not in os.environ:
+            print(f"Ollama generation failed: {e}")
         
-    print("AI generation failed. Using default fallback list.")
+    print("AI generation failed for this round. Using fallback list.")
+    # Add a small delay if AI fails to prevent rapid looping
+    time.sleep(10)
+    
     return [
-        "Leonardo DiCaprio|I'm the king of the world!",
-        "Brad Pitt|You must lose everything in order to gain anything.",
-        "Scarlett Johansson|I'm always looking for a challenge.",
-        "Tom Cruise|I feel the need, the need for speed.",
-        "Morgan Freeman|Get busy living or get busy dying."
+        "Joe Biden|The future belongs to those who believe in the beauty of their dreams.",
+        "Rishi Sunak|Integrity and professionalism are my top priorities.",
+        "Justin Trudeau|Diversity is our strength.",
+        "Narendra Modi|Individual effort can make a big difference.",
+        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here."
     ]
 
 # 1. Get the famous people list from Google Drive or Generate it
@@ -233,12 +251,12 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     return people
 
-def download_model_from_drive(service, local_model_path):
-    """Download model files from Google Drive 'OmniVoice_model' folder."""
+def download_model_from_drive(service, local_model_path, folder_name="OmniVoice_model"):
+    """Download model files from Google Drive."""
     import upload_results
     from googleapiclient.http import MediaIoBaseDownload as DL
     
-    model_folder_id = upload_results.get_drive_folder_id(service, "OmniVoice_model")
+    model_folder_id = upload_results.get_drive_folder_id(service, folder_name)
     if not model_folder_id:
         return False
     
@@ -266,11 +284,11 @@ def download_model_from_drive(service, local_model_path):
     print("Model downloaded from Google Drive.")
     return True
 
-def upload_model_to_drive(service, local_model_path):
-    """Upload model files to Google Drive 'OmniVoice_model' folder."""
+def upload_model_to_drive(service, local_model_path, folder_name="OmniVoice_model"):
+    """Upload model files to Google Drive."""
     import upload_results
     
-    model_folder_id = upload_results.create_drive_folder(service, "OmniVoice_model")
+    model_folder_id = upload_results.create_drive_folder(service, folder_name)
     if not model_folder_id:
         print("Could not create model folder on Drive.")
         return
@@ -310,18 +328,65 @@ def main():
     
     model = OmniVoice.from_pretrained(model_path)
     
-    # If we downloaded from HuggingFace, cache to Google Drive for next time
-    if model_path == 'k2-fsa/OmniVoice':
-        # Find the HF cache path and upload
-        try:
-            from huggingface_hub import snapshot_download
-            hf_local = snapshot_download(repo_id='k2-fsa/OmniVoice')
-            service = get_drive_service()
-            if service and hf_local:
-                print("Caching model to Google Drive for future runs...")
-                upload_model_to_drive(service, hf_local)
-        except Exception as e:
-            print(f"Could not cache model to Drive: {e}")
+    # Pre-load the ASR model (try Google Drive cache first, then HuggingFace)
+    print("Pre-loading ASR model...")
+    asr_downloaded_from_hf = False
+    try:
+        # Check if ASR model is cached on Google Drive
+        service = get_drive_service()
+        asr_local_path = os.path.join(script_dir, "models", "OmniVoice_ASR")
+        if service and not (os.path.exists(asr_local_path) and os.listdir(asr_local_path)):
+            if download_model_from_drive(service, asr_local_path, folder_name="OmniVoice_ASR_model"):
+                # Set HF cache env so OmniVoice finds it
+                os.environ["HF_HUB_CACHE"] = os.path.dirname(asr_local_path)
+                print("ASR model loaded from Google Drive cache.")
+    except Exception as e:
+        print(f"ASR Drive cache check: {e}")
+    
+    try:
+        model.load_asr_model()
+        print("ASR model ready.")
+        asr_downloaded_from_hf = True
+    except Exception as e:
+        print(f"ASR model pre-load note: {e}")
+    
+    # Cache models to Google Drive for next time
+    service = get_drive_service()
+    if service:
+        # Cache OmniVoice model
+        if model_path == 'k2-fsa/OmniVoice':
+            try:
+                from huggingface_hub import snapshot_download
+                hf_local = snapshot_download(repo_id='k2-fsa/OmniVoice')
+                print("Caching OmniVoice model to Google Drive...")
+                upload_model_to_drive(service, hf_local, folder_name="OmniVoice_model")
+            except Exception as e:
+                print(f"Could not cache OmniVoice model to Drive: {e}")
+        
+        # Cache ASR model
+        if asr_downloaded_from_hf:
+            try:
+                from huggingface_hub import snapshot_download
+                # Find the ASR model path from HF cache
+                import upload_results
+                asr_folder_id = upload_results.get_drive_folder_id(service, "OmniVoice_ASR_model")
+                if not asr_folder_id:
+                    # Try to find the ASR model in HF cache and upload
+                    hf_cache = os.path.expanduser("~/.cache/huggingface/hub")
+                    if os.path.exists(hf_cache):
+                        for d in os.listdir(hf_cache):
+                            full_d = os.path.join(hf_cache, d)
+                            if os.path.isdir(full_d) and "whisper" in d.lower():
+                                snap = os.path.join(full_d, "snapshots")
+                                if os.path.exists(snap):
+                                    subdirs = os.listdir(snap)
+                                    if subdirs:
+                                        asr_path = os.path.join(snap, subdirs[0])
+                                        print(f"Caching ASR model to Google Drive from {asr_path}...")
+                                        upload_model_to_drive(service, asr_path, folder_name="OmniVoice_ASR_model")
+                                        break
+            except Exception as e:
+                print(f"Could not cache ASR model to Drive: {e}")
     
     upload_script = os.path.join(script_dir, "upload_results.py")
 
@@ -398,52 +463,51 @@ def main():
                 query = f"{person} speaking speech"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
-                def build_cmd(search_prefix, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
+                def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
                     cmd = [
                         "python", "-m", "yt_dlp",
                         f"{search_prefix}{_query}",
                         "-x", "--audio-format", "wav",
                         "-o", _full_wav,
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30",
+                        "--download-sections", "*0:00-0:30",
                     ]
-                    # Only add cookies for YouTube (SoundCloud needs no auth)
                     is_youtube = search_prefix.startswith("ytsearch")
-                    if is_youtube and _is_valid_cookies_file(_cookies_file):
+                    if is_youtube:
+                        cmd += ["--js-runtimes", "nodejs"]
+                    if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
                         cmd += ["--cookies", _cookies_file]
                     return cmd
 
                 downloaded = False
                 
-                # Try YouTube
-                result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
+                # Try SoundCloud first (no auth needed)
+                print("Trying SoundCloud...")
+                result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
                 if result.returncode == 0 and os.path.exists(full_wav):
                     downloaded = True
-                    print(f"Downloaded from YouTube.")
-                else:
-                    print(f"YouTube failed with cookies. Trying without cookies...")
-                    fallback_cmd = [
-                        "python", "-m", "yt_dlp",
-                        f"ytsearch1:{query}",
-                        "-x", "--audio-format", "wav",
-                        "-o", full_wav,
-                        "--no-playlist", "--retries", "3", "--socket-timeout", "30",
-                    ]
-                    result2 = subprocess.run(fallback_cmd, check=False, capture_output=True, text=True)
-                    if result2.returncode == 0 and os.path.exists(full_wav):
+                    print(f"Downloaded from SoundCloud.")
+
+                # Try YouTube with cookies if SoundCloud failed
+                if not downloaded and _is_valid_cookies_file(cookies_file):
+                    print("Trying YouTube with cookies...")
+                    result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True), check=False, capture_output=True, text=True)
+                    if result.returncode == 0 and os.path.exists(full_wav):
+                        downloaded = True
+                        print(f"Downloaded from YouTube (with cookies).")
+                    else:
+                        print(f"YouTube with cookies failed:\n{result.stderr[-500:]}")
+
+                # Try YouTube without cookies as last resort
+                if not downloaded:
+                    print("Trying YouTube without cookies...")
+                    result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
+                    if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
                         print(f"Downloaded from YouTube (no cookies).")
                     else:
-                        print(f"YouTube fallback also failed:\n{result2.stderr[-800:]}")
+                        print(f"YouTube without cookies failed:\n{result.stderr[-500:]}")
 
-                # Try SoundCloud
-                if not downloaded:
-                    print("Trying SoundCloud...")
-                    result = subprocess.run(build_cmd("scsearch1:"), check=False, capture_output=True, text=True)
-                    if result.returncode == 0 and os.path.exists(full_wav):
-                        downloaded = True
-                        print(f"Downloaded from SoundCloud.")
-                    else:
-                        print(f"SoundCloud failed:\n{result.stderr[-800:]}")  # show full error
 
                 if not downloaded:
                     print(f"Skipping {person} — could not download audio.")

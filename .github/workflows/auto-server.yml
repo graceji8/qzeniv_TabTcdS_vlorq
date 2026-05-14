@@ -168,6 +168,8 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
+          CLOUDFLARE_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_ACCOUNTS_JSON }}
           DISPLAY: ':99'
         run: |
           source venv/bin/activate
