@@ -107,6 +107,10 @@ def get_vad_model():
         if "http_proxy" in os.environ: del os.environ["http_proxy"]
         if "https_proxy" in os.environ: del os.environ["https_proxy"]
         
+        # Increase socket timeout for model loading
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(300)
+        
         # Set 3-minute alarm for VAD load
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(180)
@@ -129,11 +133,15 @@ def get_vad_model():
             signal.alarm(0) # Disable alarm
             if old_http: os.environ["http_proxy"] = old_http
             if old_https: os.environ["https_proxy"] = old_https
+            socket.setdefaulttimeout(old_timeout)
     return _VAD_MODEL, _VAD_UTILS
 
 def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...", flush=True)
     model, utils = get_vad_model()
+    if model is None or utils is None:
+        print("ERROR: VAD model could not be loaded. Skipping clear speech extraction.", flush=True)
+        return False
     get_speech_timestamps = utils[0]
     
     try:
