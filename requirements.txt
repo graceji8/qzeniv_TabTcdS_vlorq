@@ -11,3 +11,4 @@ soundfile
 httpx[socks]
 wikipedia
 duckduckgo-search
+bing-image-downloader

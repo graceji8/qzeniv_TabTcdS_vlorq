@@ -167,33 +167,18 @@ def search_reference_videos(person_name, output_path):
     checkpoint(f"Searching for reference videos for {person_name}...")
     query = f"{person_name} interview speech"
     
-    # We use yt-dlp to do a search and grab the first 3 results
-    cmd = [
-        sys.executable, "-m", "yt_dlp",
-        f"ytsearch3:{query}",
-        "--get-id", "--get-title"
-    ]
-    
-    proxy = os.environ.get("YTDLP_PROXY")
-    if proxy:
-        cmd += ["--proxy", proxy]
-        
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            checkpoint(f"yt-dlp error: {result.stderr}")
-            return
-            
-        lines = result.stdout.strip().split('\n')
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(f"Reference videos for {person_name}:\n\n")
-            for i in range(0, len(lines), 2):
-                if i+1 < len(lines):
-                    title = lines[i]
-                    vid_id = lines[i+1]
-                    f.write(f"Title: {title}\nURL: https://www.youtube.com/watch?v={vid_id}\n\n")
-        checkpoint("Reference videos saved.")
+        if DDGS:
+            results = list(DDGS().videos(keywords=query, max_results=3))
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(f"Reference videos for {person_name}:\n\n")
+                for r in results:
+                    title = r.get('title', 'Unknown Title')
+                    url = r.get('content', '')
+                    f.write(f"Title: {title}\nURL: {url}\n\n")
+            checkpoint("Reference videos saved.")
+        else:
+            checkpoint("duckduckgo_search not installed, skipping video search.")
     except Exception as e:
         checkpoint(f"Error fetching video links: {e}")
 
