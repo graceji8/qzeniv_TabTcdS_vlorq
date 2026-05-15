@@ -29,12 +29,7 @@ socket.setdefaulttimeout(60)
 def checkpoint(msg, **kwargs):
     """Print timestamped message to track execution progress."""
     ts = datetime.now().strftime("%H:%M:%S")
-<<<<<<< HEAD
     kwargs.setdefault("flush", True)
-=======
-    if 'flush' not in kwargs:
-        kwargs['flush'] = True
->>>>>>> 5737ed63909660185c834ff5d323b2079d20ceaf
     print(f"[{ts}] CHECKPOINT: {msg}", **kwargs)
 
 class TimeoutException(Exception):
@@ -471,7 +466,7 @@ def generate_famous_people_with_ai(service=None):
 
     prompt = (
         f"Generate a list of 20 of the most famous and recognizable CURRENTLY ALIVE top world leaders for the year 2026. "
-        f"Include potential or incoming leaders like Mark Carney from Canada, alongside extremely well-known figures like Donald Trump, Emmanuel Macron, etc. "
+        f"Include potential or incoming leaders, and explicitly include leaders from Asia such as Japan, South Korea, and Taiwan, alongside extremely well-known figures like Donald Trump, Emmanuel Macron, etc. "
         f"DO NOT include anyone who is deceased. "
     )
     
@@ -606,7 +601,9 @@ def generate_famous_people_with_ai(service=None):
     if not people:
         print("AI generation failed for this round. Using fallback list.", flush=True)
         # Add a small delay if AI fails to prevent rapid looping
-        time.sleep(5)    fallback = [
+        time.sleep(5)
+
+    fallback = [
         "Joe Biden|The future belongs to those who believe in the beauty of their dreams.|male|United States",
         "Rishi Sunak|Integrity and professionalism are my top priorities.|male|United Kingdom",
         "Justin Trudeau|Diversity is our strength.|male|Canada",
@@ -656,8 +653,13 @@ def generate_famous_people_with_ai(service=None):
         "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.|male|United Kingdom",
         "Keir Starmer|Country first, party second.|male|United Kingdom",
         "Olaf Scholz|We are living through a watershed era.|male|Germany",
-        "Xi Jinping|The people's aspirations for a better life are what we must fight for.|male|China"
-    ]e"
+        "Xi Jinping|The people's aspirations for a better life are what we must fight for.|male|China",
+        "Fumio Kishida|Japan must take a leading role in maintaining a free and open international order.|male|Japan",
+        "Yoon Suk Yeol|Freedom and solidarity are the foundation of our democracy.|male|South Korea",
+        "Lai Ching-te|We will continue to defend our democracy and freedom.|male|Taiwan",
+        "Lee Jae-myung|We will create a society where everyone has a fair chance.|male|South Korea",
+        "Kim Jong Un|Our party will continue to fight for the prosperity of the nation.|male|North Korea",
+        "Sanae Takaichi|I am committed to strengthening our national security and economy.|female|Japan"
     ]
     
     random.shuffle(fallback)
