@@ -907,12 +907,17 @@ def main():
         print(f"  ROUND {round_num} — Fetching fresh list from Drive", flush=True)
         print(f"{'#'*40}", flush=True)
 
-        # Round 1: use existing Drive list if available
-        # Round 2+: always generate a fresh AI list
-        famous_people_data = get_famous_people_from_drive(
-            "famous_people.txt",
-            force_regenerate=(round_num > 1)
-        )
+        target_person_env = os.environ.get("TARGET_PERSON")
+        if target_person_env:
+            famous_people_data = [target_person_env]
+            print(f"Using specific TARGET_PERSON: {target_person_env}", flush=True)
+        else:
+            # Round 1: use existing Drive list if available
+            # Round 2+: always generate a fresh AI list
+            famous_people_data = get_famous_people_from_drive(
+                "famous_people.txt",
+                force_regenerate=(round_num > 1)
+            )
 
         if not famous_people_data:
             print("No people found. Waiting 60s before retrying...", flush=True)
@@ -1139,6 +1144,10 @@ def main():
 
             print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)
+
+        if target_person_env:
+            print(f"Finished processing specific TARGET_PERSON: {target_person_env}. Exiting.", flush=True)
+            break
 
         print(f"\nRound {round_num} complete. Starting next round immediately...", flush=True)
 
