@@ -172,7 +172,7 @@ def get_vad_model():
             socket.setdefaulttimeout(old_timeout)
     return _VAD_MODEL, _VAD_UTILS
 
-def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
+def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_model=None, person_name=None):
     print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...", flush=True)
     model, utils = get_vad_model()
     if model is None or utils is None:
@@ -202,7 +202,14 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     else:
         wav_16k = wav
         
-    speech_timestamps = get_speech_timestamps(wav_16k, model, sampling_rate=16000, threshold=0.65)
+    speech_timestamps = get_speech_timestamps(
+        wav_16k, 
+        model, 
+        sampling_rate=16000, 
+        threshold=0.85,
+        min_speech_duration_ms=1000,
+        min_silence_duration_ms=1000
+    )
     
     if not speech_timestamps:
         print("No speech detected by AI.", flush=True)
@@ -211,15 +218,63 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     target_samples_16k = int(target_duration * 16000)
     best_segment = None
     
-    for ts in speech_timestamps:
+    import tempfile
+    
+    # Sort candidates by length descending
+    candidates = sorted(speech_timestamps, key=lambda x: x['end'] - x['start'], reverse=True)
+    
+    for ts in candidates:
         length = ts['end'] - ts['start']
-        if length >= target_samples_16k:
-            best_segment = {'start': ts['start'], 'end': ts['start'] + target_samples_16k}
+        if length < 16000 * 3: # Skip segments shorter than 3 seconds
+            continue
+            
+        start_sample = int(ts['start'] * samplerate / 16000)
+        end_sample = int(ts['end'] * samplerate / 16000)
+        
+        # Check transcription if ASR model is provided
+        is_clean = True
+        if asr_model:
+            # Extract a chunk for checking (up to 10 seconds)
+            check_end_sample = min(end_sample, start_sample + int(10 * samplerate))
+            extracted_data = data[start_sample:check_end_sample]
+            
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            sf.write(tmp_path, extracted_data, samplerate)
+            
+            try:
+                text = asr_model.transcribe(tmp_path).lower()
+                print(f"Candidate transcription ({start_sample/samplerate:.1f}s): {text}", flush=True)
+                
+                bad_tags = ["[applause]", "(applause)", "[music]", "(music)", "[laughter]", "(laughter)"]
+                if any(tag in text for tag in bad_tags):
+                    print("Found applause/music/laughter tag. Skipping.", flush=True)
+                    is_clean = False
+                elif len(text.split()) < 3:
+                    print("Too few words. Skipping.", flush=True)
+                    is_clean = False
+                elif person_name and person_name.lower() in text:
+                    print(f"Found person's name '{person_name}' in text, likely an intro. Skipping.", flush=True)
+                    is_clean = False
+                elif "please welcome" in text or "here is" in text or "introducing" in text:
+                    print("Found intro phrase. Skipping.", flush=True)
+                    is_clean = False
+            except Exception as e:
+                print(f"Transcribe error: {e}", flush=True)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        
+        if is_clean:
+            best_segment = {'start': ts['start'], 'end': ts['end']}
+            if best_segment['end'] - best_segment['start'] > target_samples_16k:
+                best_segment['end'] = best_segment['start'] + target_samples_16k
             break
             
     if not best_segment:
-        longest = max(speech_timestamps, key=lambda x: x['end'] - x['start'])
-        best_segment = longest
+        # Fallback to the longest if none were "clean"
+        print("No fully clean segment found, falling back to longest.", flush=True)
+        best_segment = candidates[0]
         if best_segment['end'] - best_segment['start'] > target_samples_16k:
             best_segment['end'] = best_segment['start'] + target_samples_16k
 
@@ -818,7 +873,7 @@ def main():
                     f.write(f"URL: {info_url}\n")
 
                 # VAD
-                success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0)
+                success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person)
                 if not success:
                     print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.", flush=True)
                     try:
