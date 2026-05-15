@@ -67,7 +67,7 @@ PROCESSED_PEOPLE = set()
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
 
 def fetch_processed_people(service):
-    """Fetch all folder names from the materials directory to skip them later."""
+    """Fetch all folder names from the materials directory that HAVE a ref.wav file."""
     global PROCESSED_PEOPLE
     if not service:
         return
@@ -75,9 +75,45 @@ def fetch_processed_people(service):
     checkpoint(f"Fetching processed people list from Drive (Folder: {MATERIALS_FOLDER_ID})...")
     try:
         import upload_results
-        contents = upload_results.get_drive_folder_contents(service, MATERIALS_FOLDER_ID)
-        PROCESSED_PEOPLE = {name.replace("_", " ").strip().lower() for name in contents.keys()}
-        checkpoint(f"Found {len(PROCESSED_PEOPLE)} already processed individuals.")
+        # 1. Get all subfolders in the materials directory
+        folders = upload_results.get_drive_folder_contents(service, MATERIALS_FOLDER_ID)
+        if not folders:
+            PROCESSED_PEOPLE = set()
+            checkpoint("No processed folders found.")
+            return
+
+        # 2. Search for all 'ref.wav' files to see which folders they belong to
+        # This is more efficient than listing every subfolder individually
+        ref_parents = set()
+        page_token = None
+        while True:
+            results = service.files().list(
+                q="name = 'ref.wav' and trashed = false",
+                fields="nextPageToken, files(parents)",
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+            for f in results.get('files', []):
+                if f.get('parents'):
+                    ref_parents.update(f['parents'])
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
+        
+        # 3. Only count as processed if the folder name exists AND it has a ref.wav
+        processed = set()
+        missing_ref = []
+        for name, info in folders.items():
+            if info['id'] in ref_parents:
+                processed.add(name.replace("_", " ").strip().lower())
+            else:
+                missing_ref.append(name)
+        
+        PROCESSED_PEOPLE = processed
+        if missing_ref:
+            checkpoint(f"Folders missing ref.wav (will re-process): {', '.join(missing_ref)}")
+        checkpoint(f"Found {len(PROCESSED_PEOPLE)} fully processed individuals (with ref.wav).")
     except Exception as e:
         checkpoint(f"Could not fetch processed people list: {e}")
 
@@ -670,15 +706,15 @@ def main():
                     checkpoint(f"Skipping {person} — already in PROCESSED_PEOPLE cache.", flush=True)
                     continue
                 
-                # Extra check for cloned.wav if cache might be stale
+                # Extra check for ref.wav if cache might be stale
                 service = get_drive_service()
                 if service:
                     import upload_results
                     person_folder_id = upload_results.get_drive_folder_id(service, folder_name, MATERIALS_FOLDER_ID)
                     if person_folder_id:
                         contents = upload_results.get_drive_folder_contents(service, person_folder_id)
-                        if "cloned.wav" in contents:
-                            checkpoint(f"Skipping {person} — cloned.wav actually exists on Drive.", flush=True)
+                        if "ref.wav" in contents:
+                            checkpoint(f"Skipping {person} — ref.wav actually exists on Drive.", flush=True)
                             PROCESSED_PEOPLE.add(person.lower())
                             continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
