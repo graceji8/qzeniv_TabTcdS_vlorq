@@ -1,4 +1,4 @@
-name: OmniVoice Studio + UI Server
+name: Studio
 
 on:
   # schedule:
