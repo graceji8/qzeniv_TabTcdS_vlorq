@@ -122,6 +122,68 @@ def fetch_processed_people(service):
     except Exception as e:
         checkpoint(f"Could not fetch processed people list: {e}")
 
+def sync_drive_to_api(service):
+    """Sync downloaded voices from Google Drive to the local OmniVoice API so they appear in the UI."""
+    checkpoint("Checking local API for missing voices from Drive...")
+    api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
+    try:
+        resp = requests.get(f"{api_url}/gallery/voices", timeout=10)
+        if resp.status_code != 200:
+            checkpoint("API not ready or reachable, skipping sync.")
+            return
+        local_voices = resp.json()
+        local_names = {v['name'].lower() for v in local_voices}
+    except Exception as e:
+        checkpoint(f"Could not reach API: {e}")
+        return
+        
+    import upload_results
+    materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
+    if not materials_id:
+        return
+    folders = upload_results.get_drive_folder_contents(service, materials_id)
+    
+    synced_count = 0
+    for name, info in folders.items():
+        clean_name = name.replace("_", " ").strip()
+        if clean_name.lower() in local_names:
+            continue
+            
+        # Missing from API, check if it has a ref.wav
+        person_contents = upload_results.get_drive_folder_contents(service, info['id'])
+        if "ref.wav" in person_contents:
+            checkpoint(f"Syncing '{clean_name}' from Drive to local API...")
+            try:
+                file_id = person_contents["ref.wav"]['id']
+                from googleapiclient.http import MediaIoBaseDownload
+                request = service.files().get_media(fileId=file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                fh.seek(0)
+                
+                requests.post(
+                    f"{api_url}/gallery/upload",
+                    data={
+                        "name": clean_name,
+                        "character": clean_name,
+                        "category": "Celebs",
+                        "description": "Synced from Google Drive"
+                    },
+                    files={"audio": ("ref.wav", fh, "audio/wav")},
+                    timeout=30
+                )
+                synced_count += 1
+            except Exception as e:
+                checkpoint(f"Failed to sync '{clean_name}' to API: {e}")
+                
+    if synced_count > 0:
+        checkpoint(f"Successfully synced {synced_count} voices to the UI.")
+    else:
+        checkpoint("Local API is up to date with Google Drive.")
+
 def _is_valid_cookies_file(path):
     try:
         if not os.path.exists(path) or os.path.getsize(path) < 10:
@@ -772,7 +834,11 @@ def main():
     # Cache models to Google Drive for next time
     checkpoint("Entering model caching phase...")
     service = get_drive_service()
+    
     if service:
+        # Sync existing Google Drive materials to the UI DB before starting the loop
+        sync_drive_to_api(service)
+        
         # Cache OmniVoice model
         if model_path == 'k2-fsa/OmniVoice':
             try:
@@ -1032,6 +1098,28 @@ def main():
                     print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Upload failed for {person}: {e}", flush=True)
+
+                # Upload to local API so it appears in UI instantly
+                try:
+                    api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
+                    with open(ref_wav, "rb") as f:
+                        resp = requests.post(
+                            f"{api_url}/gallery/upload",
+                            data={
+                                "name": person,
+                                "character": person,
+                                "category": "Celebs",
+                                "description": f"Generated from YouTube. Search: {query}"
+                            },
+                            files={"audio": ("ref.wav", f, "audio/wav")},
+                            timeout=30
+                        )
+                    if resp.status_code == 200:
+                        print(f"Uploaded {person} to local OmniVoice API.", flush=True)
+                    else:
+                        print(f"Failed to upload {person} to API: {resp.status_code} {resp.text}", flush=True)
+                except Exception as e:
+                    print(f"API upload failed for {person}: {e}", flush=True)
 
             print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)
