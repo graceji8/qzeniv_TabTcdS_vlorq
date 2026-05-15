@@ -112,9 +112,14 @@ def get_drive_folder_id(service, folder_name, parent_id=None):
     query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     if parent_id:
         query += f" and '{parent_id}' in parents"
-    
+        
     try:
-        results = service.files().list(q=query, fields="files(id)").execute()
+        results = service.files().list(
+            q=query, 
+            fields="files(id)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
         files = results.get('files', [])
         return files[0]['id'] if files else None
     except Exception as e:
@@ -124,12 +129,22 @@ def get_drive_folder_id(service, folder_name, parent_id=None):
 def get_drive_folder_contents(service, folder_id):
     query = f"'{folder_id}' in parents and trashed = false"
     files_dict = {}
-    page_token = None
+    try:
+        # First, verify we can even see the parent folder
+        service.files().get(fileId=folder_id, supportsAllDrives=True).execute()
+    except Exception as e:
+        print(f"DEBUG: Permission error or folder not found for ID '{folder_id}': {e}")
+        return {}
+
     try:
         while True:
-            results = service.files().list(q=query, 
-                                         fields="nextPageToken, files(id, name, mimeType, md5Checksum, size)",
-                                         pageToken=page_token).execute()
+            results = service.files().list(
+                q=query, 
+                fields="nextPageToken, files(id, name, mimeType, md5Checksum, size)",
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
             for f in results.get('files', []):
                 files_dict[f['name']] = f
             page_token = results.get('nextPageToken')
@@ -152,7 +167,11 @@ def create_drive_folder(service, folder_name, parent_id=None):
         file_metadata['parents'] = [parent_id]
     
     try:
-        file = service.files().create(body=file_metadata, fields='id').execute()
+        file = service.files().create(
+            body=file_metadata, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
         new_id = file.get('id')
         print(f"DEBUG: Created folder '{folder_name}' with ID: {new_id} (Parent: {parent_id})")
         return new_id
@@ -172,9 +191,12 @@ def upload_worker(task):
         if existing_file.get('md5Checksum') == local_md5:
             return f"SKIPPED: {file_name}"
         else:
-            media = MediaFileUpload(local_path, resumable=True)
             try:
-                service.files().update(fileId=existing_file['id'], media_body=media).execute()
+                service.files().update(
+                    fileId=existing_file['id'], 
+                    media_body=media,
+                    supportsAllDrives=True
+                ).execute()
                 return f"UPDATED: {file_name}"
             except Exception as e:
                 return f"ERROR updating {file_name}: {e}"
@@ -187,7 +209,11 @@ def upload_worker(task):
         
     media = MediaFileUpload(local_path, mimetype=mimetype, resumable=True)
     try:
-        service.files().create(body=file_metadata, media_body=media).execute()
+        service.files().create(
+            body=file_metadata, 
+            media_body=media,
+            supportsAllDrives=True
+        ).execute()
         return f"UPLOADED: {file_name}"
     except Exception as e:
         return f"ERROR uploading {file_name}: {e}"
