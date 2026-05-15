@@ -818,95 +818,115 @@ def main():
                 # Clear previous run's files so we re-process fresh each round
                 for f in [full_wav, ref_wav, cloned_wav, search_info_txt]:
                     if os.path.exists(f):
-                        os.remove(f)
-
-                # Download
-                print(f"Downloading audio for {person}...", flush=True)
-                query = f"{person} speaking speech original voice -interpreter -dubbed -translated -translator"
-                cookies_file = os.path.join(script_dir, "cookies.txt")
-
-                def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
-                    cmd = [
-                        sys.executable, "-m", "yt_dlp",
-                        f"{search_prefix}{_query}",
-                        "-f", "ba*[language=en]/ba*[language=orig]/ba/worst",
-                        "-x", "--audio-format", "wav",
-                        "-o", _full_wav,
-                        "--write-info-json",
-                        "--no-playlist", "--retries", "3", "--socket-timeout", "30",
-                        "--extractor-args", "youtube:player-client=web,android"
-                    ]
-                    is_youtube = search_prefix.startswith("ytsearch")
-                    if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
-                        cmd += ["--cookies", _cookies_file]
-                    proxy = os.environ.get("YTDLP_PROXY")
-                    if proxy:
-                        cmd += ["--proxy", proxy]
-                    return cmd
-
-                downloaded = False
-                
-                # Try YouTube with cookies first
-                if _is_valid_cookies_file(cookies_file):
-                    print("Trying YouTube with cookies...", flush=True)
-                    result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True), check=False, capture_output=True, text=True)
-                    if result.returncode == 0 and os.path.exists(full_wav):
-                        downloaded = True
-                        print("Downloaded from YouTube (with cookies).", flush=True)
-                    else:
-                        print(f"YouTube with cookies failed:\n{result.stderr[-300:]}", flush=True)
-
-                # Try YouTube without cookies
-                if not downloaded:
-                    print("Trying YouTube without cookies...", flush=True)
-                    result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
-                    if result.returncode == 0 and os.path.exists(full_wav):
-                        downloaded = True
-                        print("Downloaded from YouTube (no cookies).", flush=True)
-                    else:
-                        print(f"YouTube without cookies failed:\n{result.stderr[-300:]}", flush=True)
-
-                # Try SoundCloud as last resort
-                if not downloaded:
-                    print("Trying SoundCloud...", flush=True)
-                    sc_cmd = build_cmd("scsearch3:", _query=f"{person} speech")
-                    result = subprocess.run(sc_cmd, check=False, capture_output=True, text=True)
-                    if result.returncode == 0 and os.path.exists(full_wav):
-                        downloaded = True
-                        print(f"Downloaded from SoundCloud.", flush=True)
-                    else:
-                        print(f"SoundCloud failed:\n{result.stderr[-500:]}", flush=True)
-
-
-                if not downloaded:
-                    print(f"Skipping {person} — could not download audio.", flush=True)
-                    continue
-
-                # Get URL and save search info
-                info_url = "URL not found"
-                json_path1 = full_wav.replace('.wav', '.info.json')
-                json_path2 = full_wav + '.info.json'
-                for jp in [json_path1, json_path2]:
-                    if os.path.exists(jp):
-                        try:
-                            import json
-                            with open(jp, 'r', encoding='utf-8') as f:
-                                info_data = json.load(f)
-                                info_url = info_data.get('webpage_url', info_url)
-                        except Exception as e:
-                            print(f"Could not read info json {jp}: {e}", flush=True)
-                        try:
-                            os.remove(jp)
+                        try: os.remove(f)
                         except: pass
 
-                with open(search_info_txt, "w", encoding="utf-8") as f:
-                    f.write(f"Keywords: {query}\n")
-                    f.write(f"URL: {info_url}\n")
+                max_attempts = 3
+                success = False
 
-                # VAD
-                success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person)
+                for attempt in range(1, max_attempts + 1):
+                    print(f"\n--- Attempt {attempt}/{max_attempts} for {person} ---", flush=True)
+
+                    # Clear files for this attempt
+                    for f in [full_wav, ref_wav, search_info_txt]:
+                        if os.path.exists(f):
+                            try: os.remove(f)
+                            except: pass
+
+                    # Download
+                    print(f"Downloading audio for {person} (Search index: {attempt})...", flush=True)
+                    query = f"{person} speaking speech original voice -interpreter -dubbed -translated -translator"
+                    cookies_file = os.path.join(script_dir, "cookies.txt")
+
+                    def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=attempt):
+                        cmd = [
+                            sys.executable, "-m", "yt_dlp",
+                            f"{search_type}{item_index}:{_query}",
+                            "--playlist-items", str(item_index),
+                            "-f", "ba*[language=en]/ba*[language=orig]/ba/worst",
+                            "-x", "--audio-format", "wav",
+                            "-o", _full_wav,
+                            "--write-info-json",
+                            "--retries", "3", "--socket-timeout", "30",
+                            "--extractor-args", "youtube:player-client=web,android"
+                        ]
+                        is_youtube = search_type.startswith("ytsearch")
+                        if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
+                            cmd += ["--cookies", _cookies_file]
+                        proxy = os.environ.get("YTDLP_PROXY")
+                        if proxy:
+                            cmd += ["--proxy", proxy]
+                        return cmd
+
+                    downloaded = False
+                    
+                    # Try YouTube with cookies first
+                    if _is_valid_cookies_file(cookies_file):
+                        print("Trying YouTube with cookies...", flush=True)
+                        result = subprocess.run(build_cmd("ytsearch", use_cookies=True), check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print("Downloaded from YouTube (with cookies).", flush=True)
+                        else:
+                            print(f"YouTube with cookies failed:\n{result.stderr[-300:]}", flush=True)
+
+                    # Try YouTube without cookies
+                    if not downloaded:
+                        print("Trying YouTube without cookies...", flush=True)
+                        result = subprocess.run(build_cmd("ytsearch"), check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print("Downloaded from YouTube (no cookies).", flush=True)
+                        else:
+                            print(f"YouTube without cookies failed:\n{result.stderr[-300:]}", flush=True)
+
+                    # Try SoundCloud as last resort
+                    if not downloaded:
+                        print("Trying SoundCloud...", flush=True)
+                        sc_cmd = build_cmd("scsearch", _query=f"{person} speech")
+                        result = subprocess.run(sc_cmd, check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print(f"Downloaded from SoundCloud.", flush=True)
+                        else:
+                            print(f"SoundCloud failed:\n{result.stderr[-500:]}", flush=True)
+
+
+                    if not downloaded:
+                        print(f"Skipping {person} — could not download audio on attempt {attempt}.", flush=True)
+                        continue
+
+                    # Get URL and save search info
+                    info_url = "URL not found"
+                    json_path1 = full_wav.replace('.wav', '.info.json')
+                    json_path2 = full_wav + '.info.json'
+                    for jp in [json_path1, json_path2]:
+                        if os.path.exists(jp):
+                            try:
+                                import json
+                                with open(jp, 'r', encoding='utf-8') as f:
+                                    info_data = json.load(f)
+                                    info_url = info_data.get('webpage_url', info_url)
+                            except Exception as e:
+                                print(f"Could not read info json {jp}: {e}", flush=True)
+                            try:
+                                os.remove(jp)
+                            except: pass
+
+                    with open(search_info_txt, "w", encoding="utf-8") as f:
+                        f.write(f"Keywords: {query}\n")
+                        f.write(f"URL: {info_url}\n")
+                        f.write(f"Attempt: {attempt}\n")
+
+                    # VAD
+                    success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person)
+                    if success:
+                        break # Found clear speech!
+                    else:
+                        print(f"Failed to find clear speech in attempt {attempt}.", flush=True)
+
                 if not success:
-                    print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.", flush=True)
+                    print(f"Failed to find clear speech for {person} after {max_attempts} attempts. Uploading to Google Drive for review.", flush=True)
                     try:
                         subprocess.run([
                             "python", upload_script,
