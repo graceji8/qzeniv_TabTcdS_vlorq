@@ -1,0 +1,247 @@
+/* ── Stories / Audiobook Editor ─────────────────────────────────────── */
+
+.stories-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 12px;
+  padding: 16px;
+  font-family: var(--font-sans);
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.stories-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stories-editor__title {
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--color-fg);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stories-editor__subtitle {
+  color: var(--color-fg-muted);
+  font-size: var(--text-sm);
+}
+
+.stories-editor__actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Track list ───────────────────────────────────────────────────── */
+
+.stories-editor__tracks {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.stories-editor__tracks::-webkit-scrollbar { width: 6px; }
+.stories-editor__tracks::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+/* ── Single track row ─────────────────────────────────────────────── */
+
+.stories-track {
+  display: grid;
+  grid-template-columns: 32px 1fr 160px 100px 44px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--color-bg-elev-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: grab;
+}
+
+.stories-track:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.stories-track--active {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 1px var(--color-brand-glow);
+}
+
+.stories-track--narrator {
+  border-left: 3px solid var(--color-accent);
+}
+
+/* Drag handle */
+.stories-track__grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-fg-subtle);
+  cursor: grab;
+}
+
+.stories-track__grip:active {
+  cursor: grabbing;
+}
+
+/* Text area */
+.stories-track__text {
+  width: 100%;
+  background: var(--color-bg-elev-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: 6px 8px;
+  resize: none;
+  min-height: 36px;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+
+.stories-track__text:focus {
+  border-color: var(--color-brand);
+  outline: none;
+}
+
+/* Voice selector */
+.stories-track__voice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stories-track__voice-select {
+  flex: 1;
+  background: var(--color-bg-elev-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-size: var(--text-xs);
+  padding: 4px 6px;
+  font-family: var(--font-sans);
+}
+
+.stories-track__voice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Character tag */
+.stories-track__character {
+  font-size: var(--text-xs);
+  color: var(--color-fg-muted);
+  background: var(--color-bg-elev-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Track actions */
+.stories-track__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.stories-track__btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-fg-subtle);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+  padding: 0;
+}
+
+.stories-track__btn:hover {
+  color: var(--color-fg);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.stories-track__btn--delete:hover {
+  color: var(--color-danger);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────── */
+
+.stories-editor__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--color-fg-muted);
+  text-align: center;
+}
+
+.stories-editor__empty-icon {
+  font-size: 2rem;
+  opacity: 0.4;
+}
+
+.stories-editor__empty-text {
+  font-size: var(--text-sm);
+  max-width: 320px;
+  line-height: 1.6;
+}
+
+/* ── Footer / generate bar ────────────────────────────────────────── */
+
+.stories-editor__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.stories-editor__stats {
+  font-size: var(--text-xs);
+  color: var(--color-fg-subtle);
+  display: flex;
+  gap: 12px;
+}
+
+.stories-editor__stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Character color palette ──────────────────────────────────────── */
+
+.stories-track__voice-dot[data-char="narrator"]  { background: var(--color-accent); }
+.stories-track__voice-dot[data-char="char-0"]    { background: #d3869b; }
+.stories-track__voice-dot[data-char="char-1"]    { background: #83a598; }
+.stories-track__voice-dot[data-char="char-2"]    { background: #b8bb26; }
+.stories-track__voice-dot[data-char="char-3"]    { background: #fabd2f; }
+.stories-track__voice-dot[data-char="char-4"]    { background: #fe8019; }
+.stories-track__voice-dot[data-char="char-5"]    { background: #8ec07c; }

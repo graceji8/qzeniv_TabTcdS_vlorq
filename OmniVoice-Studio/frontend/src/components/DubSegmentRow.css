@@ -1,0 +1,60 @@
+/* ═══ DubSegmentRow extracted layout styles ═══ */
+.seg-check {
+  width: 16px; flex-shrink: 0; margin-right: 2px; cursor: pointer;
+}
+.seg-time {
+  width: 50px; flex-shrink: 0; display: flex; flex-direction: column;
+}
+.seg-sync-badge {
+  font-size: 0.5rem; margin-top: 2px;
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.seg-rate-badge {
+  font-size: 0.5rem; margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.seg-speed-badge {
+  font-size: 0.55rem; margin-left: 2px;
+}
+.seg-speaker-input {
+  width: 45px; flex-shrink: 0; font-size: 0.55rem; color: #a89984;
+  padding: 1px 2px; text-align: center;
+}
+.seg-text-col {
+  flex: 1 1 0%; display: flex; flex-direction: column; gap: 2px;
+  min-width: 80px; overflow: hidden;
+}
+.seg-text-col .segment-input {
+  width: 100%; min-width: 0;
+}
+.seg-orig-row {
+  font-size: 0.55rem; color: #6b6657;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 4px; overflow: hidden;
+}
+.seg-orig-label {
+  opacity: 0.8; text-transform: uppercase; font-weight: 600;
+  font-size: 0.5rem; color: #7c6f64;
+}
+.seg-orig-text {
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.seg-budget-warn { color: #fabd2f; font-size: 0.5rem; }
+.seg-restore-btn {
+  background: none; border: none; color: #83a598;
+  cursor: pointer; padding: 0; font-size: 0.55rem;
+}
+.seg-lang-select {
+  width: 42px; flex-shrink: 0; font-size: 0.5rem; padding: 1px 2px;
+}
+.seg-profile-select {
+  width: 60px; flex-shrink: 0; font-size: 0.55rem; padding: 1px 2px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.seg-gain-slider {
+  width: 40px !important; max-width: 40px; flex-shrink: 0; flex-grow: 0;
+  height: 3px; padding: 0; margin: 0;
+}
+.seg-actions {
+  display: flex; gap: 1px; width: 42px; flex-shrink: 0;
+}

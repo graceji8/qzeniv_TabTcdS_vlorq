@@ -1,0 +1,79 @@
+# ──────────────────────────────────────────────────────────────
+#  OmniVoice Studio — Docker Compose
+#
+#  Quick start:
+#    docker compose -f deploy/docker-compose.yml up                 # CPU mode
+#    docker compose -f deploy/docker-compose.yml --profile gpu up   # GPU mode
+#
+#  First run downloads ~4 GB of models. Progress is shown in logs.
+#  Open http://localhost:3900 once the health check passes.
+#
+#  SECURITY: The port is bound to 127.0.0.1 by default — only this
+#  machine can reach the API. To expose OmniVoice on your LAN (or
+#  through a reverse proxy / tunnel), change the port mapping to
+#  "0.0.0.0:3900:3900" or "3900:3900". OmniVoice itself ships no
+#  authentication — if you expose it, put it behind a reverse proxy
+#  with auth (Caddy basic_auth, nginx + htpasswd, Tailscale, etc.).
+# ──────────────────────────────────────────────────────────────
+
+services:
+  # ── CPU mode (default) ──────────────────────────────────────
+  omnivoice:
+    image: ghcr.io/debpalash/omnivoice-studio:latest
+    # To build from source instead of pulling, comment out `image:` and
+    # uncomment the two lines below:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: omnivoice-studio
+    ports:
+      - "127.0.0.1:3900:3900"
+    volumes:
+      - omnivoice-data:/app/omnivoice_data
+    environment:
+      - HF_HOME=/app/omnivoice_data/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+      - OMNIVOICE_DATA_DIR=/app/omnivoice_data
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── GPU mode — activate with: docker compose --profile gpu up
+  omnivoice-gpu:
+    image: ghcr.io/debpalash/omnivoice-studio:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: omnivoice-studio-gpu
+    profiles: ["gpu"]
+    ports:
+      - "127.0.0.1:3900:3900"
+    volumes:
+      - omnivoice-data:/app/omnivoice_data
+    environment:
+      - HF_HOME=/app/omnivoice_data/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+      - OMNIVOICE_DATA_DIR=/app/omnivoice_data
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  omnivoice-data:

@@ -1,6 +1,7 @@
 *.wav
 temp_workspace/
 venv/
+scripts/models/*
 token.pickle
 credentials.json
 youtube_cookies.txt

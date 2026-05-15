@@ -1,0 +1,2360 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* ── Map design tokens → Tailwind v4 theme ──────────────────────────── */
+@theme {
+  /* Colors — semantic */
+  --color-fg:            #ebdbb2;
+  --color-fg-muted:      #a89984;
+  --color-fg-subtle:     #7c6f64;
+  --color-fg-inverse:    #1d2021;
+
+  --color-bg:            #1d2021;
+  --color-bg-elev-1:     rgba(50, 48, 47, 0.85);
+  --color-bg-elev-2:     rgba(0, 0, 0, 0.30);
+  --color-bg-elev-3:     rgba(0, 0, 0, 0.18);
+
+  --color-border:        rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+  --color-border-warm:   rgba(243, 165, 182, 0.08);
+
+  --color-brand:         #d3869b;
+  --color-brand-hover:   #b16286;
+  --color-brand-glow:    rgba(211, 134, 155, 0.4);
+
+  --color-accent:        #fabd2f;
+  --color-success:       #8ec07c;
+  --color-warn:          #fe8019;
+  --color-danger:        #fb4934;
+  --color-info:          #83a598;
+
+  --color-chrome-bg:     #0f1011;
+  --color-chrome-fg:     #d5c4a1;
+
+  /* Radius */
+  --radius-xs:  2px;
+  --radius-sm:  3px;
+  --radius-md:  4px;
+  --radius-lg:  6px;
+  --radius-xl: 10px;
+
+  /* Fonts */
+  --font-sans:    'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-serif:   'Source Serif 4 Variable', 'Source Serif 4', Georgia, serif;
+}
+
+/* Font imports removed — the chrome token system uses only system monospace
+   (ui-monospace, SFMono-Regular, Menlo, Consolas). Fraunces / Nunito / Outfit
+   / Inter are no longer referenced by any rule. */
+
+:root {
+  --primary: #d3869b;
+  --primary-hover: #b16286;
+  --accent: #fabd2f;
+  --bg: #1d2021;
+  --glass-bg: rgba(50, 48, 47, 0.85);
+  --glass-border: rgba(235, 219, 178, 0.08);
+  --glass-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+  --blur: blur(16px) saturate(140%);
+  --text-primary: #ebdbb2;
+  --text-secondary: #a89984;
+  --radius: 6px;
+  --gap: 6px;
+  --transition-fast: 0.12s ease;
+  --transition-smooth: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Chrome tokens ──
+     Introduced with the LogsFooter status bar. Surfaces that want the
+     same tight dark-chrome look reference these (Header topbar now,
+     future: Sidebar edges, Settings tab bar, NavRail). Keeping values
+     in one place means style tweaks flow everywhere in sync. */
+  --chrome-bg:            #0f1011;
+  --chrome-border:        rgba(255, 255, 255, 0.08);
+  --chrome-border-strong: rgba(255, 255, 255, 0.12);
+  --chrome-fg:            #d5c4a1;
+  --chrome-fg-muted:      #a89984;
+  --chrome-fg-dim:        #7c6f64;
+  --chrome-accent:        #f3a5b6;
+  --chrome-accent-bg:     rgba(243, 165, 182, 0.12);
+  --chrome-accent-border: rgba(243, 165, 182, 0.35);
+  --chrome-severity-err:  #fb4934;
+  --chrome-severity-warn: #fabd2f;
+  --chrome-severity-ok:   #8ec07c;
+  --chrome-radius-pill:   3px;
+  --chrome-hover-bg:      rgba(255, 255, 255, 0.04);
+  /* Chrome-label face is IBM Plex Mono now — defined in ui/tokens.css as
+     --font-mono. Keep this alias so existing `var(--chrome-font-mono)` rules
+     don't need to change; it just picks up the new face automatically. */
+  --chrome-font-mono:     var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --chrome-label-size:    11px;
+  --chrome-label-track:   0.06em;
+  --chrome-bar-h:         28px;
+  --chrome-pill-h:        20px;
+  --chrome-icon-btn:      22px;
+}
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes mesh {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(251,73,52,0.4); } 50% { opacity: 0.85; box-shadow: 0 0 12px 4px rgba(251,73,52,0.3); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ═══ FOUNDATION ═══ */
+*, *::before, *::after { box-sizing: border-box; }
+
+::selection {
+  background: color-mix(in srgb, var(--chrome-accent) 35%, transparent);
+  color: #fff;
+}
+
+/* Root rendering — applies to everything unless overridden. */
+html {
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
+  /* Inter OT flags that nudge it toward Söhne:
+     cv11  – single-story `a`
+     ss01  – alt digits (straight 4, balanced 6/9)
+     ss03  – alt `l` with serif-foot (legibility win at 10–12 px) */
+  font-feature-settings: "cv11", "ss01", "ss03";
+  /* Make sure kerning is on — some WebKit builds leave it off by default. */
+  font-kerning: normal;
+}
+
+body {
+  margin: 0; padding: 0;
+  background-color: var(--chrome-bg);
+  color: var(--chrome-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;             /* was 12px — +1 to give Inter room to breathe */
+  line-height: 1.5;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Default headings — sans, tight leading. Overrides live per page. */
+h1, h2, h3, h4 {
+  font-family: var(--font-sans);
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+
+/* Tabular numbers + slashed zero wherever columns of digits need to line up.
+   Anything already on `--font-mono` inherits mono + these features. */
+.segment-time,
+.segment-table code,
+.ui-table-toolbar__meta,
+.hq-stats,
+.dub-gen-overlay__stats,
+.dub-trans-overlay__stats,
+.logs-footer__count,
+[data-tabular] {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Mono rule of thumb — IBM Plex Mono ships with slashed zero in its `zero`
+   OT feature, tabular by default. Make both explicit so a browser that
+   ignores the feature-settings still gets it. */
+code,
+kbd,
+pre,
+samp,
+[class*="chrome-font-mono"],
+[style*="chrome-font-mono"] {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "zero", "ss02";
+}
+
+#root {
+  display: flex;
+  justify-content: center;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+}
+
+/* ═══ LAYOUT ═══ */
+.app-container {
+  width: 100%;
+  max-width: 100vw;
+  display: grid;
+  /* [rail 48px] [sidebar 180–220] [main 1fr] */
+  grid-template-columns: 48px minmax(180px, 220px) minmax(0, 4fr);
+  grid-template-rows: auto 1fr;
+  gap: 0px;
+  /* Shrink the studio grid by the LogsFooter's current height so its
+     sidebar + main column always stop exactly at the footer's top edge.
+     The footer itself (position:fixed) writes `--logs-footer-height` on
+     :root whenever it toggles collapsed/expanded or the user resizes. */
+  height: calc(100% - var(--logs-footer-height, 28px));
+  overflow: hidden;
+  transition: grid-template-columns var(--transition-smooth);
+}
+.app-container.sidebar-collapsed {
+  grid-template-columns: 48px 46px minmax(0, 4fr);
+}
+.app-container.sidebar-hidden {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+.app-container.sidebar-hidden > .history-panel {
+  display: none;
+}
+.app-container.sidebar-hidden > .main-content {
+  grid-column: 2; /* rail col1, main col2 */
+}
+/* Rail on right side */
+.app-container.rail-right {
+  grid-template-columns: minmax(180px, 220px) minmax(0, 4fr) 48px;
+}
+.app-container.rail-right.sidebar-collapsed {
+  grid-template-columns: 46px minmax(0, 4fr) 48px;
+}
+.app-container.rail-right.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr) 48px;
+}
+.app-container.rail-right > .nav-rail { grid-column: 3; }
+.app-container.rail-right > .history-panel { grid-column: 1; }
+.app-container.rail-right > .main-content { grid-column: 2; }
+.app-container.rail-right.sidebar-hidden > .main-content { grid-column: 1; }
+.app-container > .nav-rail {
+  grid-column: 1;
+  grid-row: 2;
+}
+.app-container > .history-panel {
+  grid-column: 2;
+  grid-row: 2;
+}
+.app-container > .main-content {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  grid-column: 3;
+  grid-row: 2;
+  /* Flat chrome — the shared warm radial + paper grain wash was the
+     root cause of the "too warm" feel across Clone / Design / Dub /
+     Settings. Every tab now sits on the same neutral chrome bg. */
+  background: var(--chrome-bg);
+  position: relative;
+}
+.app-container > .main-content::before { display: none; }
+.app-container > .main-content > * { position: relative; z-index: 1; }
+.app-container > div { min-width: 0; }
+
+/* ≤1100: auto-collapse sidebar, keep nav + main */
+@media (max-width: 1100px) {
+  .app-container { grid-template-columns: 48px minmax(0, 1fr) !important; }
+  .app-container > .history-panel { display: none !important; }
+  .app-container > .main-content { grid-column: 2 !important; }
+  .app-container.rail-right { grid-template-columns: minmax(0, 1fr) 48px !important; }
+  .app-container.rail-right > .main-content { grid-column: 1 !important; }
+}
+
+/* ≤600: hide nav rail too, full-width main */
+@media (max-width: 600px) {
+  .app-container { grid-template-columns: minmax(0, 1fr) !important; }
+  .app-container > .nav-rail { display: none; }
+  .app-container > .main-content { grid-column: 1 !important; }
+}
+
+/* ═══ PANELS — flat chrome ═══ */
+.glass-panel {
+  background: var(--chrome-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--chrome-border);
+  border-radius: 0;
+  padding: 12px;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.08) 30%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.08) 70%, rgba(255,255,255,0));
+  pointer-events: none;
+}
+
+/* ═══ HEADER — warm + cute ═══ */
+.header-area {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+  /* Matches the LogsFooter's chrome: flat bg, hairline bottom border,
+     no radial glow, no blur, no decorative SVG ribbon. The pulsing
+     accent dot + italic logo still carry the brand. */
+  padding: 6px 16px 6px 64px;
+  background: var(--chrome-bg);
+  border-bottom: 1px solid var(--chrome-border);
+  user-select: none;
+  position: relative;
+  z-index: 100;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  cursor: default;
+  padding-right: 8px;
+}
+
+/* ── Header columns ──────────────────────────────────────────── */
+.hq-col-left {
+  display: flex; align-items: center; gap: 14px;
+  justify-self: start; min-width: 0;
+}
+.hq-col-left__spacer   { min-width: 80px; flex-shrink: 0; }
+.hq-col-center {
+  display: flex; align-items: center; gap: 8px;
+  justify-self: center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hq-col-right {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 12px; justify-self: end;
+  min-width: 0; overflow: visible;
+}
+
+/* Logo */
+.hq-logo-mark   { transform: none; }
+.hq-logo-word {
+  font-size: 0.92rem; font-weight: 600; color: var(--chrome-fg);
+  letter-spacing: 0.02em;
+  font-family: var(--font-sans);
+  font-style: normal;
+}
+.hq-logo-word__accent { color: var(--chrome-accent); }
+
+/* Breadcrumb chevron spacing + inline-icon spacing */
+.hq-breadcrumb-sep  { margin: 0 2px; }
+.hq-view-icon       { margin-right: 4px; vertical-align: -1px; }
+
+/* Stats readout — informational, not a button. No outer pill/shell;
+   the thin vertical dividers between groups do the visual grouping. */
+.hq-stats {
+  display: flex;
+  gap: 10px;
+  font-family: var(--chrome-font-mono);
+  font-size: 10.5px;
+  color: var(--chrome-fg-dim);
+  background: transparent;
+  height: var(--chrome-pill-h);
+  padding: 0;
+  border: none;
+  white-space: nowrap;
+  flex-shrink: 1;
+  align-items: center;
+  overflow: hidden;
+}
+.hq-stats__key     { color: var(--chrome-fg-muted); font-weight: 600; }
+.hq-stats__key--gpu-active { color: var(--chrome-severity-ok); }
+.hq-stats__sep {
+  border-left: 1px solid var(--chrome-border);
+  padding-left: 6px;
+}
+.hq-stats__status-wrap {
+  border-left: 1px solid var(--chrome-border);
+  padding-left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hq-stats__status-badge {
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-weight: 600 !important;
+}
+.hq-flush-btn      { margin-left: 2px; }
+.hq-reload-btn     { flex-shrink: 0; }
+
+/* Flush dropdown — portalled to document.body, positioned dynamically via JS */
+.hq-flush-dropdown {
+  position: fixed;
+  width: 260px;
+  background: var(--color-bg-elev-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  padding: 4px 0;
+  animation: flush-slide 0.12s ease-out;
+}
+@keyframes flush-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.hq-flush-dropdown__header {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 12px 4px;
+}
+.hq-flush-dropdown__empty {
+  padding: 12px;
+  font-size: 11px;
+  color: var(--color-fg-muted);
+  text-align: center;
+}
+.hq-flush-dropdown__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  gap: 8px;
+}
+.hq-flush-dropdown__item:hover { background: rgba(255,255,255,0.03); }
+.hq-flush-dropdown__info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hq-flush-dropdown__name { font-size: 12px; color: var(--color-fg); font-weight: 500; }
+.hq-flush-dropdown__meta { font-size: 10px; color: var(--color-fg-subtle); font-family: var(--font-mono); }
+.hq-flush-dropdown__unload {
+  font-size: 10px; font-weight: 600;
+  color: var(--color-brand);
+  background: rgba(211,134,155,0.1);
+  border: 1px solid rgba(211,134,155,0.2);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px; cursor: pointer;
+  flex-shrink: 0;
+}
+.hq-flush-dropdown__unload:hover { background: rgba(211,134,155,0.2); }
+.hq-flush-dropdown__divider { height: 1px; background: var(--color-border); margin: 4px 0; }
+.hq-flush-dropdown__action {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 12px;
+  font-size: 12px; color: var(--color-fg);
+  background: none; border: none; cursor: pointer;
+  text-align: left;
+}
+.hq-flush-dropdown__action:hover { background: rgba(255,255,255,0.04); }
+.hq-flush-dropdown__action--danger { color: #fb4934; }
+.hq-flush-dropdown__action--danger:hover { background: rgba(251,73,52,0.08); }
+/* Decorative wavy SVG ribbon was removed — the flat chrome gets its
+   separation from the hairline `border-bottom` above, matching the
+   LogsFooter's top edge. */
+
+/* HQ breadcrumb — informational label, not a button. No pill shell. */
+.hq-view-title {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--chrome-pill-h);
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-sans);
+}
+.hq-view-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  animation: hqPulse 2.4s ease-in-out infinite;
+}
+@keyframes hqPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.7; }
+}
+.hq-view-kicker {
+  font-size: var(--chrome-label-size);
+  font-weight: 600;
+  letter-spacing: var(--chrome-label-track);
+  text-transform: uppercase;
+  color: var(--chrome-fg-muted);
+}
+.hq-view-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.hq-view-project {
+  font-family: var(--font-sans);
+  font-size: 0.68rem; font-weight: 500;
+  color: var(--chrome-fg-muted);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.hq-wave {
+  display: inline-flex; align-items: center; gap: 2px; height: 16px;
+  padding: 0 6px;
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+.hq-wave.is-active { opacity: 1; }
+
+/* Responsive header — hide low-priority elements as width tightens.
+   Priority (least → most important):
+   reload → wave → kicker+chevron → project name → stats pill → S/M/L picker
+   → dot → logo wordmark. Label + icon always visible.
+*/
+
+/* ≤1500: drop dev reload + kicker + first chevron */
+@media (max-width: 1500px) {
+  .hq-view-kicker { display: none; }
+  .hq-view-title > svg.lucide-chevron-right:first-of-type { display: none; }
+  .header-area button[title="Force Reload UI"] { display: none; }
+}
+
+/* ≤1350: drop mini-waveform */
+@media (max-width: 1350px) {
+  .hq-wave { display: none; }
+}
+
+/* ≤1200: drop active project name */
+@media (max-width: 1200px) {
+  .hq-view-project { display: none; }
+}
+
+/* ≤1080: hide RAM/CPU text, keep VRAM + status + flush */
+@media (max-width: 1080px) {
+  .hq-stats > span:nth-child(1),
+  .hq-stats > span:nth-child(2) { display: none; }
+}
+
+/* ≤960: shrink breadcrumb, hide S/M/L scale picker */
+@media (max-width: 960px) {
+  .hq-view-title { padding: 4px 10px; gap: 5px; }
+  .hq-view-label { font-size: 0.78rem; }
+  .hq-scale { display: none; }
+}
+
+/* ≤850: hide stats pill entirely */
+@media (max-width: 850px) {
+  .hq-stats { display: none !important; }
+}
+
+/* ≤820: drop pulsing dot + shrink logo */
+@media (max-width: 820px) {
+  .hq-view-dot { display: none; }
+}
+
+/* ≤720: hide logo wordmark, keep icon only */
+@media (max-width: 720px) {
+  .header-area > div:nth-child(2) span { display: none; }
+}
+
+/* ≤600: minimal header — just breadcrumb label */
+@media (max-width: 600px) {
+  .header-area { padding-left: 12px; padding-right: 4px; }
+  .header-area > div:nth-child(2) { display: none; }
+  .hq-view-title { padding: 3px 8px; }
+}
+
+/* Prevent clusters overlapping: clip content inside grid cells */
+.header-area > div { min-width: 0; overflow: hidden; }
+.header-area > div:nth-child(2),
+.header-area > div:nth-child(3) { overflow: visible; }
+.hq-wave-bar {
+  display: inline-block; width: 2.5px; border-radius: 2px;
+  transition: opacity 0.2s;
+}
+.hq-wave-bar.active {
+  animation: hqBounce 1.3s ease-in-out infinite;
+}
+@keyframes hqBounce {
+  0%, 100% { transform: scaleY(0.6); opacity: 0.75; }
+  50% { transform: scaleY(1.25); opacity: 1; }
+}
+.header-area h1 {
+  font-size: 1.1rem; font-weight: 700;
+  background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  letter-spacing: -0.01em;
+}
+.header-area p { margin: 0; color: var(--text-secondary); font-size: 0.7rem; }
+
+/* ═══ TABS — migrated to ui/Tabs primitive; legacy .tabs/.tab removed. ═══ */
+
+/* ═══ GRID SYSTEMS ═══ */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+
+/* Shared section-label style across workspace pages (Clone / Design /
+   Dub) — rhymes with the status bar's "LOGS" label and the Sidebar
+   section titles. Monospace + uppercase + tracked + muted so labels
+   feel like chrome, leaving content rows to carry the colour. */
+.label-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+  color: var(--chrome-fg-muted);
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  font-weight: 600;
+  letter-spacing: var(--chrome-label-track);
+  text-transform: uppercase;
+}
+.label-icon { color: var(--chrome-fg-muted); }
+
+/* ═══ INPUTS ═══ */
+.input-base {
+  width: 100%;
+  background: var(--chrome-hover-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 5px 8px;
+  color: var(--chrome-fg);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+  box-sizing: border-box;
+}
+.input-base:focus {
+  outline: none;
+  border-color: var(--chrome-border-strong);
+  box-shadow: none;
+  background: var(--chrome-bg);
+}
+.input-base::placeholder { color: var(--chrome-fg-dim); }
+textarea.input-base { min-height: 60px; resize: vertical; line-height: 1.5; }
+
+select.input-base {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23a1a1aa%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px top 50%;
+  background-size: 0.4rem auto;
+  padding-right: 18px;
+  cursor: pointer;
+}
+select.input-base:hover {
+  border-color: rgba(255,255,255,0.12);
+}
+
+/* ═══ CHECKBOX STYLING ═══ */
+input[type="checkbox"] {
+  accent-color: var(--chrome-accent);
+  width: 13px; height: 13px;
+  border-radius: 3px;
+}
+
+/* ═══ RANGE INPUTS ═══ */
+input[type="range"] {
+  -webkit-appearance: none; width: 100%; height: 3px;
+  background: rgba(255,255,255,0.08); border-radius: 2px; outline: none; margin-top: 3px;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--text-primary); cursor: pointer;
+  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+  transition: transform var(--transition-fast);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+}
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(1.1);
+  background: var(--primary);
+}
+.val-bubble {
+  font-size: 0.65rem; background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══ TAGS ═══ */
+.tags-container { display: flex; flex-wrap: wrap; gap: 3px; margin: 4px 0; }
+.tag-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+  color: var(--text-secondary); padding: 2px 6px; border-radius: 3px;
+  font-size: 0.65rem; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); white-space: nowrap;
+  font-family: var(--chrome-font-mono);
+}
+.tag-btn:hover {
+  background: var(--chrome-hover-bg); color: var(--chrome-fg);
+  border-color: var(--chrome-border-strong);
+  transform: none;
+}
+.tag-btn:active { transform: none; }
+
+.file-drag {
+  border: 1px dashed var(--chrome-border-strong); border-radius: var(--chrome-radius-pill); padding: 10px;
+  text-align: center; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: transparent;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.file-drag:hover,
+.file-drag.is-dragging {
+  border-color: var(--chrome-accent); background: var(--chrome-accent-bg);
+  box-shadow: none;
+}
+.file-drag p { margin: 0; font-size: 0.72rem; color: var(--chrome-fg-muted); }
+
+/* ═══ PROGRESS — migrated to ui/Progress primitive. ═══ */
+
+/* ═══ BUTTON ═══ */
+/* Flat chrome primary — accent = text + border, no gradient / shimmer.
+   Matches the dub footer button family so the whole app reads as one
+   chrome typography row. */
+.btn-primary {
+  width: 100%;
+  background: var(--chrome-accent-bg);
+  color: var(--chrome-accent);
+  border: 1px solid var(--chrome-accent-border);
+  padding: 6px 12px;
+  border-radius: var(--chrome-radius-pill);
+  font-size: 0.78rem; font-weight: 500; cursor: pointer;
+  display: flex; justify-content: center; align-items: center; gap: 6px;
+  margin-top: 6px;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+  position: relative;
+  overflow: hidden;
+  box-shadow: none;
+}
+.btn-primary::before { display: none; }
+.btn-primary:hover:not(:disabled) {
+  filter: none;
+  background: color-mix(in srgb, var(--chrome-accent) 20%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+.btn-primary:active:not(:disabled) {
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+.spinner { animation: spin 1s linear infinite; }
+
+/* ═══ SIDEBAR / HISTORY ═══ */
+.history-panel {
+  height: 100%;
+  max-height: none;
+  overflow-y: auto;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(255,255,255,0.04);
+}
+.history-item {
+  background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 5px; padding: 6px 8px; margin-bottom: 4px;
+  transition: all var(--transition-smooth);
+  animation: fadeIn 0.2s ease-out;
+}
+.history-item:hover {
+  background: rgba(0,0,0,0.28);
+  border-color: rgba(255,255,255,0.08);
+}
+/* .history-header / .history-badge / .history-time / .history-text migrated to Badge + Sidebar.css. */
+.project-active {
+  border-color: rgba(184,187,38,0.4) !important;
+  background: rgba(184,187,38,0.06) !important;
+  box-shadow: inset 0 0 0 1px rgba(184,187,38,0.12), 0 0 8px rgba(184,187,38,0.06);
+}
+
+/* ═══ AUDIO PLAYER ═══ */
+audio {
+  height: 28px; width: 100%; outline: none; border-radius: 4px;
+}
+audio::-webkit-media-controls-enclosure {
+  background-color: rgba(40,38,37,0.95);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 4px;
+}
+audio::-webkit-media-controls-play-button,
+audio::-webkit-media-controls-mute-button {
+  background-color: rgba(255,255,255,0.06); border-radius: 50%; color: var(--chrome-accent);
+}
+audio::-webkit-media-controls-current-time-display,
+audio::-webkit-media-controls-time-remaining-display { color: var(--chrome-fg); font-size: 0.65rem; }
+
+/* ═══ OVERRIDES / MODALS ═══ */
+.override-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(0,0,0,0.18); padding: 4px 8px; border-radius: 4px;
+  font-size: 0.72rem; color: var(--text-primary); cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.04); margin-top: 6px;
+  transition: all var(--transition-smooth);
+}
+.override-toggle:hover { background: rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.08); }
+.override-content {
+  background: rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.04); border-top: none;
+  padding: 6px 8px; border-radius: 0 0 4px 4px; margin-bottom: 6px;
+}
+.preset-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 4px; margin-bottom: 6px;
+}
+.preset-btn {
+  background: rgba(94,106,210,0.06); border: 1px solid rgba(94,106,210,0.15);
+  color: #c7d2fe; padding: 3px 6px; border-radius: 4px; font-size: 0.65rem;
+  cursor: pointer; transition: all var(--transition-smooth); text-align: left;
+  display: flex; align-items: center; gap: 3px;
+}
+.preset-btn:hover {
+  background: rgba(94,106,210,0.15); border-color: #a78bfa;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(94,106,210,0.15);
+}
+.preset-btn:active { transform: translateY(0); }
+
+/* ═══ SEGMENT TABLE ═══ */
+.segment-table {
+  /* No max-height cap — the list is virtualised via react-window and measures
+     its own body container. Capping at 320 px left a huge gap below. */
+  border: 1px solid rgba(255,255,255,0.04); border-radius: 4px; margin-top: 4px;
+}
+.segment-header {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 6px; background: rgba(0,0,0,0.35);
+  font-size: 0.62rem; font-weight: 600; color: var(--text-secondary);
+  position: sticky; top: 0; z-index: 1;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.segment-row {
+  display: flex; align-items: center; gap: 3px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+  transition: background var(--transition-fast);
+}
+.segment-row:hover { background: var(--chrome-hover-bg); }
+.segment-row.segment-active {
+  background: var(--chrome-accent-bg);
+  border-left: 2px solid var(--chrome-accent);
+  box-shadow: none;
+  animation: none;
+  z-index: 10;
+  position: relative;
+}
+.segment-row.segment-done { opacity: 0.5; }
+.segment-row.segment-selected {
+  background: var(--chrome-accent-bg);
+  box-shadow: inset 2px 0 0 var(--chrome-accent);
+}
+.segment-time {
+  width: 48px; flex-shrink: 0;
+  font-size: 0.62rem; font-family: var(--chrome-font-mono); color: var(--chrome-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.segment-input {
+  flex: 1;
+  padding: 2px 4px !important;
+  font-size: 0.7rem !important;
+  border-radius: 3px !important;
+  min-height: auto !important;
+}
+.segment-del {
+  width: 20px; height: 20px; flex-shrink: 0;
+  background: none; border: 1px solid rgba(251,73,52,0.12);
+  color: #fb4934; border-radius: 3px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-smooth);
+  opacity: 0.6;
+}
+.segment-del:hover { background: rgba(251,73,52,0.12); opacity: 1; }
+.segment-del:disabled { opacity: 0.2; cursor: not-allowed; }
+
+.profile-active {
+  background: rgba(142,192,124,0.12) !important;
+  border-color: #8ec07c !important;
+  color: #8ec07c !important;
+}
+
+.segment-play {
+  width: 20px; height: 20px; flex-shrink: 0;
+  background: transparent; border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted); border-radius: var(--chrome-radius-pill); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.segment-play:hover { background: var(--chrome-hover-bg); color: var(--chrome-fg); border-color: var(--chrome-border-strong); }
+
+/* ═══ WAVEFORM TIMELINE ═══ */
+.waveform-timeline { margin-bottom: 6px; }
+
+.waveform-video-preview {
+  margin-bottom: 4px; border-radius: var(--radius);
+  overflow: hidden; border: 1px solid rgba(255,255,255,0.06); background: #1d2021;
+}
+
+.waveform-container {
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: var(--radius);
+  padding: 4px;
+  overflow-x: auto;
+  height: 80px !important;
+  position: relative;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.waveform-container [data-id^="wavesurfer-region"] {
+  border-radius: 3px !important;
+}
+
+.waveform-controls {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px; gap: 4px;
+}
+.waveform-controls-left { display: flex; align-items: center; gap: 4px; }
+.waveform-controls-right { display: flex; align-items: center; gap: 4px; }
+
+.waveform-btn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+  color: var(--text-secondary); border-radius: 4px; cursor: pointer;
+  transition: all var(--transition-smooth);
+}
+.waveform-btn:hover {
+  background: rgba(255,255,255,0.1); color: var(--text-primary);
+  border-color: rgba(255,255,255,0.12);
+}
+.waveform-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.waveform-btn-play {
+  background: var(--chrome-accent-bg); border-color: var(--chrome-accent-border); color: var(--chrome-accent);
+}
+.waveform-btn-play:hover {
+  background: color-mix(in srgb, var(--chrome-accent) 22%, transparent);
+  box-shadow: none;
+}
+
+.waveform-time {
+  font-size: 0.62rem; font-family: var(--chrome-font-mono); color: var(--chrome-fg-muted);
+  padding: 1px 5px; background: var(--chrome-hover-bg); border-radius: 3px;
+  border: 1px solid var(--chrome-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.waveform-zoom-slider {
+  width: 60px !important; height: 2px !important; margin-top: 0 !important;
+}
+
+/* ═══ MULTI-TRACK ═══ */
+.waveform-track-bg {
+  position: absolute; left: 0; right: 0; height: 26px;
+  background: rgba(255,255,255,0.015);
+  border-bottom: 1px dashed rgba(255,255,255,0.04);
+  pointer-events: none; z-index: 1;
+}
+.waveform-track-bg:nth-child(1) { top: 0px; }
+.waveform-track-bg:nth-child(2) { top: 26px; }
+.waveform-track-bg:nth-child(3) { top: 52px; }
+
+.waveform-container [data-id^="wavesurfer-region"] {
+  top: 52px !important;
+  height: 26px !important;
+  border-radius: 3px !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  display: flex !important; align-items: center !important;
+  padding: 0 3px !important; color: white !important;
+  font-size: 0.58rem !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+  overflow: hidden; white-space: nowrap;
+}
+
+/* ═══ SCROLLBAR ═══ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08); border-radius: 3px;
+  border: 1px solid transparent;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+
+/* ═══ TOOLTIP HINT ═══ */
+[title] { position: relative; }
+
+/* ═══ FOCUS VISIBLE (keyboard nav) ═══ */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--chrome-accent, #d3869b) 65%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--chrome-accent, #d3869b) 15%, transparent);
+}
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible) { outline: none; box-shadow: none; }
+
+/* ═══ LAUNCHPAD — chrome frame + restrained motion ═══ */
+.launchpad {
+  flex: 1; display: flex; flex-direction: column; overflow-y: auto;
+  background: var(--chrome-bg);
+  position: relative;
+  isolation: isolate;
+}
+/* Paper grain removed — chrome surfaces read flat, not textured. */
+.launchpad::before { display: none; }
+
+/* ── Aurora backdrop ───────────────────────────────────────
+   Three soft blobs in the three card accent colors, drifting on
+   independent long cycles. Behind everything at z:0. Blurred heavily
+   so the motion reads as ambient light, not moving shapes. */
+.lp-aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+}
+.lp-aurora__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  will-change: transform;
+}
+.lp-aurora__blob--pink  {
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(211,134,155,0.55), transparent 60%);
+  top: -80px; left: -40px;
+  animation: lpDrift1 22s ease-in-out infinite;
+}
+.lp-aurora__blob--green {
+  width: 360px; height: 360px;
+  background: radial-gradient(circle, rgba(142,192,124,0.40), transparent 60%);
+  top: 40%; left: 55%;
+  animation: lpDrift2 28s ease-in-out infinite;
+}
+.lp-aurora__blob--amber {
+  width: 480px; height: 480px;
+  background: radial-gradient(circle, rgba(254,128,25,0.32), transparent 60%);
+  bottom: -120px; right: -80px;
+  animation: lpDrift3 32s ease-in-out infinite;
+}
+@keyframes lpDrift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(120px, 60px) scale(1.15); }
+  66%      { transform: translate(-40px, 100px) scale(0.9); }
+}
+@keyframes lpDrift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-180px, -90px) scale(1.1); }
+}
+@keyframes lpDrift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40%      { transform: translate(-100px, -60px) scale(1.05); }
+  75%      { transform: translate(60px,  -30px) scale(0.95); }
+}
+
+.lp-hero {
+  padding: 42px 44px 24px;
+  position: relative; z-index: 1;
+}
+.lp-kicker {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  font-weight: 600;
+  letter-spacing: var(--chrome-label-track);
+  text-transform: uppercase;
+  color: var(--chrome-fg-muted);
+}
+
+/* Hero H1 — Source Serif 4 at display size. Eternal halo glow sits behind
+   the text (::before via the new lp-hero__halo span so we can z-layer
+   without re-scoping the h1 itself); animated sweep underneath. */
+.lp-hero__title {
+  font-size: 2.75rem; font-weight: 400; margin: 0;
+  color: var(--chrome-fg);
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
+  line-height: 1.04;
+  display: inline-block; position: relative;
+  font-optical-sizing: auto;
+  /* Paint containing block for halo / sweep absolute children */
+  padding: 0 4px;
+}
+.lp-hero__title em {
+  font-style: italic; font-weight: 400;
+  color: var(--chrome-accent);
+  /* Italic text sits a hair above serif baseline; nudge it back down. */
+  position: relative;
+}
+.lp-hero__halo {
+  position: absolute;
+  inset: -16px -24px;
+  background: radial-gradient(
+    ellipse at 50% 60%,
+    color-mix(in srgb, var(--chrome-accent) 20%, transparent) 0%,
+    transparent 65%
+  );
+  filter: blur(16px);
+  z-index: -1;
+  pointer-events: none;
+  animation: lpHeroHalo 6s ease-in-out infinite;
+}
+@keyframes lpHeroHalo {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 0.95; transform: scale(1.06); }
+}
+.lp-hero__sweep {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: -6px;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--chrome-accent) 70%, transparent) 30%,
+    var(--chrome-accent) 50%,
+    color-mix(in srgb, var(--chrome-accent) 70%, transparent) 70%,
+    transparent 100%
+  );
+  transform-origin: center;
+  animation: lpHeroSweep 5.4s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: 2px;
+}
+@keyframes lpHeroSweep {
+  0%, 100% { transform: scaleX(0.35); opacity: 0.35; }
+  50%      { transform: scaleX(1);    opacity: 0.85; }
+}
+/* Legacy squiggle span — hidden for back-compat if ever rendered. */
+.lp-hero h1 .lp-underline { display: none; }
+.lp-hero p {
+  margin: 14px 0 0; color: var(--chrome-fg-muted); font-size: 0.82rem;
+  font-family: var(--font-sans);
+  font-weight: 400; max-width: 560px; line-height: 1.6;
+}
+.lp-hero p .lp-pill {
+  display: inline-block; padding: 1px 8px;
+  border-radius: var(--chrome-radius-pill);
+  background: var(--chrome-accent-bg);
+  border: 1px solid var(--chrome-accent-border);
+  color: var(--chrome-accent);
+  font-family: var(--chrome-font-mono);
+  font-weight: 500; font-size: 0.72rem;
+  transform: none;
+  margin: 0 2px;
+}
+
+/* Action cards — flat chrome frame, painted with:
+     • an always-on breath ring (the "eternal glow")
+     • a cursor-tracked spotlight that fires on hover
+   `--card-hue` (inline style) drives everything — background tint, icon,
+   accent border, glow color — so each card's personality flows from one
+   hex value. `isolation: isolate` contains the pseudo-layer z-stack. */
+.lp-actions {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  padding: 4px 44px; position: relative; z-index: 1;
+}
+.lp-action-card {
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 18px 18px 16px;
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-base);
+  position: relative; overflow: visible;
+  box-shadow: none;
+  isolation: isolate;
+  /* Native <button> reset */
+  font: inherit; color: inherit; text-align: left; width: 100%;
+}
+.lp-action-card:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 6%, transparent);
+  border-color: color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 40%, transparent);
+  box-shadow: 0 12px 28px -14px color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 40%, transparent);
+}
+.lp-action-card .card-icon {
+  width: 34px; height: 34px; position: relative; z-index: 1;
+  border-radius: var(--chrome-radius-pill);
+  background: color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 28%, transparent);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px;
+  transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.lp-action-card:hover .card-icon {
+  transform: scale(1.05);
+  box-shadow: 0 0 18px -2px color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 45%, transparent);
+}
+.lp-action-card__emoji {
+  display: inline-block;
+  margin-left: 2px;
+  /* Keep emoji out of the uppercase tracking of the h3 */
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ── Glow layer (spotlight + breath ring) ────────────────────────── */
+.lp-glow-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+/* Cursor spotlight — radial gradient whose center is set by --mx/--my
+   from onMouseMove. Fades in only while the card is hovered. */
+.lp-glow-layer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    260px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 28%, transparent) 0%,
+    transparent 55%
+  );
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.lp-action-card:hover .lp-glow-layer::before { opacity: 1; }
+/* Eternal breath ring — pulses forever, tied to the card's hue. Subtle
+   enough that three of them running at staggered offsets read as "alive,"
+   not "strobing." */
+.lp-glow-layer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 30%, transparent);
+  opacity: 0.2;
+  animation: lpBreath 5.2s ease-in-out infinite;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 50%, transparent);
+}
+.lp-action-card:nth-child(1) .lp-glow-layer::after { animation-delay: 0s; }
+.lp-action-card:nth-child(2) .lp-glow-layer::after { animation-delay: -1.7s; }
+.lp-action-card:nth-child(3) .lp-glow-layer::after { animation-delay: -3.4s; }
+@keyframes lpBreath {
+  0%, 100% { opacity: 0.15; box-shadow: 0 0 0 0 transparent; }
+  50%      { opacity: 0.55; box-shadow: 0 0 22px 0 color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 20%, transparent); }
+}
+/* Count badge leans on card hue too instead of hardcoded rgba. */
+.lp-action-card .card-count {
+  border-color: color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 50%, transparent) !important;
+  color: var(--card-hue, var(--chrome-accent)) !important;
+  background: color-mix(in srgb, var(--card-hue, var(--chrome-accent)) 10%, var(--chrome-bg)) !important;
+}
+/* Respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-aurora__blob,
+  .lp-hero__halo,
+  .lp-hero__sweep,
+  .lp-glow-layer::after,
+  .lp-wave-bar {
+    animation: none !important;
+  }
+}
+.lp-action-card h3 {
+  font-family: var(--chrome-font-mono);
+  font-size: 0.82rem; font-weight: 600; margin: 0 0 4px;
+  color: var(--chrome-fg);
+  letter-spacing: var(--chrome-label-track);
+  text-transform: uppercase;
+  position: relative; z-index: 1;
+}
+.lp-action-card .card-desc {
+  font-family: var(--font-sans);
+  font-size: 0.72rem; color: var(--chrome-fg-muted); margin: 0; line-height: 1.5;
+  font-weight: 400;
+  position: relative; z-index: 1;
+  min-height: 3em;
+}
+.lp-action-card .card-count {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size); font-weight: 600;
+  letter-spacing: var(--chrome-label-track);
+  padding: 1px 7px;
+  border-radius: var(--chrome-radius-pill);
+  position: absolute; top: -8px; right: -6px; z-index: 2;
+  transform: none;
+  box-shadow: none;
+  border: 1px solid var(--chrome-border-strong);
+  background: var(--chrome-bg);
+}
+
+/* Sections — softer headings */
+.lp-section {
+  padding: 28px 44px 40px; position: relative; z-index: 1;
+}
+/* Section titles on the launchpad — same chrome label treatment as the
+   sidebar / settings headings and the LOGS label in the footer. Drops
+   the Fraunces serif heading style so the three section dividers
+   ("Cloned Voices", "Designed Voices", "Dubbing Projects") rhyme with
+   the rest of the app's labels. */
+.lp-section-title {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--chrome-label-track);
+  color: var(--chrome-fg-muted);
+  margin: 0 0 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.lp-section-title::after {
+  content: ""; flex: 1; height: 1px;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.12) 1px, transparent 1px);
+  background-size: 6px 1px;
+}
+
+/* ── Launchpad extracted layout classes ──────────────────── */
+.lp-hero__row {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; flex-wrap: wrap;
+}
+.lp-hero__col { max-width: 640px; }
+.lp-hero__kicker-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.lp-hero__wave-group {
+  display: flex; align-items: center; gap: 2px; height: 22px;
+}
+.lp-section__grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+.lp-col { display: flex; flex-direction: column; gap: 8px; }
+.lp-proj-icon--clone  { background: rgba(211,134,155,0.1); }
+.lp-proj-icon--design { background: rgba(142,192,124,0.1); }
+.lp-proj-icon--locked { background: rgba(184,187,38,0.1); }
+.lp-proj-icon--dub    { background: rgba(254,128,25,0.1); overflow: hidden; }
+.lp-proj-meta--italic { font-style: italic; }
+.lp-locked-badge {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  letter-spacing: var(--chrome-label-track);
+  padding: 1px 7px;
+  border-radius: var(--chrome-radius-pill);
+  background: color-mix(in srgb, #b8bb26 10%, transparent);
+  border: 1px solid color-mix(in srgb, #b8bb26 40%, transparent);
+  color: #b8bb26; font-weight: 600;
+}
+.lp-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  position: relative; z-index: 1;
+}
+.lp-empty__inner { text-align: center; max-width: 360px; }
+.lp-empty__bars {
+  display: flex; justify-content: center; gap: 3px;
+  margin-bottom: 16px; opacity: 0.3;
+}
+.lp-empty__hint {
+  font-family: var(--chrome-font-mono);
+  font-size: 0.8rem; color: var(--chrome-fg-muted); margin: 0;
+}
+.lp-dub-thumb {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: inherit; display: block;
+}
+
+/* ── Demo-profile callout ────────────────────────────────── */
+.lp-demo-callout {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px; margin: 8px 44px 0;
+  background: color-mix(in srgb, var(--chrome-accent) 8%, var(--chrome-bg));
+  border: 1px solid var(--chrome-accent-border);
+  border-radius: var(--chrome-radius-pill);
+  font-size: 0.76rem; color: var(--chrome-fg);
+  position: relative; z-index: 1;
+  animation: lpFadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both;
+}
+.lp-demo-callout__icon { font-size: 1.1rem; }
+.lp-demo-callout__btn {
+  margin-left: auto; padding: 4px 14px;
+  font-family: var(--font-sans); font-size: 0.7rem; font-weight: 600;
+  border-radius: var(--chrome-radius-pill);
+  background: var(--chrome-accent-bg);
+  border: 1px solid var(--chrome-accent-border);
+  color: var(--chrome-accent); cursor: pointer;
+  transition: background var(--dur-fast);
+}
+.lp-demo-callout__btn:hover {
+  background: color-mix(in srgb, var(--chrome-accent) 22%, transparent);
+}
+
+/* ── Personality picker strip ────────────────────────────── */
+.personality-strip {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+}
+.personality-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px;
+  font-family: var(--font-sans); font-size: 0.72rem; font-weight: 500;
+  border-radius: var(--chrome-radius-pill);
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted); cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.personality-chip:hover {
+  background: var(--chrome-hover-bg);
+  border-color: var(--chrome-border-strong);
+  color: var(--chrome-fg);
+}
+.personality-chip.active {
+  background: var(--chrome-accent-bg);
+  border-color: var(--chrome-accent-border);
+  color: var(--chrome-accent);
+}
+.personality-chip__icon { font-size: 0.9rem; }
+.personality-label {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  font-weight: 600; text-transform: uppercase;
+  letter-spacing: var(--chrome-label-track);
+  color: var(--chrome-fg-muted);
+  margin-bottom: 6px;
+}
+
+/* Project rows — chrome-radius pills so the launchpad project list
+   rhymes with the Projects page cards. Dropped the squircle corners,
+   the translate-X hover, and the icon rotation/scale micro-animation
+   — they read as playful overlay on a chrome frame; simple hover-tint
+   fits the status-bar visual language instead. */
+.lp-project-card {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 10px 14px;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex; align-items: center; gap: 12px;
+}
+.lp-project-card:hover {
+  background: var(--chrome-hover-bg);
+  border-color: var(--chrome-border-strong);
+}
+.lp-project-card .proj-icon {
+  width: 32px; height: 32px;
+  border-radius: var(--chrome-radius-pill);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.lp-project-card .proj-info { flex: 1; min-width: 0; }
+.lp-project-card .proj-name {
+  font-family: var(--font-sans);
+  font-size: 0.78rem; font-weight: 600; color: var(--chrome-fg);
+  letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lp-project-card .proj-meta {
+  font-family: var(--chrome-font-mono);
+  font-size: 0.62rem; color: var(--chrome-fg-dim); margin-top: 2px; font-weight: 400;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lp-project-card .proj-action {
+  font-family: var(--font-sans);
+  font-size: 0.7rem; font-weight: 500; padding: 4px 12px;
+  border-radius: var(--chrome-radius-pill);
+  background: transparent;
+  border: 1px solid var(--chrome-border-strong);
+  color: var(--chrome-fg-muted); cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  flex-shrink: 0;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.lp-project-card .proj-action:hover {
+  background: var(--chrome-hover-bg); color: var(--chrome-fg);
+  border-color: var(--chrome-fg-muted);
+  transform: none;
+}
+
+/* Launchpad A/B Compare trigger — flat chrome accent button, no rotation. */
+.lp-ab-compare {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px;
+  font-family: var(--font-sans);
+  font-size: 0.72rem; font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--chrome-accent);
+  background: var(--chrome-accent-bg);
+  border: 1px solid var(--chrome-accent-border);
+  border-radius: var(--chrome-radius-pill);
+  cursor: pointer; flex-shrink: 0;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.lp-ab-compare:hover {
+  background: color-mix(in srgb, var(--chrome-accent) 22%, transparent);
+}
+
+/* Staggered fade-in */
+@keyframes lpFadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.lp-animate { animation: lpFadeUp 0.4s cubic-bezier(0.4,0,0.2,1) both; }
+.lp-animate:nth-child(1) { animation-delay: 0s; }
+.lp-animate:nth-child(2) { animation-delay: 0.06s; }
+.lp-animate:nth-child(3) { animation-delay: 0.12s; }
+
+/* Wave bars — each one reads its own --bar-h / --bar-dur / --bar-delay so
+   the group breathes organically instead of marching in lockstep. Colour
+   shifts between chrome fg + accent through the cycle so the visualiser
+   feels like it's tuning into a real signal. */
+@keyframes lpWaveBeat {
+  0%, 100% {
+    transform: scaleY(0.45);
+    background: var(--chrome-fg-muted);
+    box-shadow: none;
+  }
+  35% {
+    transform: scaleY(1.15);
+    background: var(--chrome-accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--chrome-accent) 55%, transparent);
+  }
+  65% {
+    transform: scaleY(0.8);
+    background: color-mix(in srgb, var(--chrome-accent) 60%, var(--chrome-fg-muted));
+    box-shadow: none;
+  }
+}
+.lp-wave-bar {
+  display: inline-block;
+  width: 3px;
+  height: var(--bar-h, 12px);
+  border-radius: 2px;
+  background: var(--chrome-fg-muted);
+  transform-origin: center;
+  animation: lpWaveBeat var(--bar-dur, 2s) ease-in-out infinite;
+  animation-delay: var(--bar-delay, 0s);
+}
+
+/* ── Searchable combobox ─────────────────────────────────── */
+.ss-wrap { position: relative; width: 100%; }
+.ss-trigger {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; width: 100%; text-align: left; cursor: pointer;
+  font-family: inherit;
+}
+.ss-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
+.ss-trigger-label {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary);
+}
+.ss-chev { color: var(--text-secondary); flex-shrink: 0; }
+.ss-sm .ss-trigger { font-size: 0.65rem; padding: 4px 8px; }
+.ss-md .ss-trigger { font-size: 0.75rem; }
+
+.ss-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  z-index: 1000;
+  background: rgba(29, 32, 33, 0.98);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  min-width: 220px;
+  max-width: min(360px, 90vw);
+}
+.ss-search {
+  position: relative;
+  padding: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center; gap: 6px;
+}
+.ss-search-icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text-secondary); pointer-events: none;
+}
+.ss-search-input {
+  flex: 1; width: 100%;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  padding: 5px 8px 5px 24px;
+  font-size: 0.72rem; color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+}
+.ss-search-input:focus { border-color: rgba(250, 189, 47, 0.4); }
+
+.ss-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+.ss-list::-webkit-scrollbar { width: 6px; }
+.ss-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+.ss-group-label {
+  padding: 4px 10px 2px;
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  display: flex; align-items: center; gap: 4px;
+}
+
+.ss-option {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.ss-option:hover, .ss-option.ss-hl {
+  background: rgba(250, 189, 47, 0.12);
+  color: var(--accent);
+}
+.ss-option.ss-sel {
+  background: rgba(142, 192, 124, 0.1);
+  color: #8ec07c;
+  font-weight: 500;
+}
+.ss-option.ss-sel.ss-hl {
+  background: rgba(250, 189, 47, 0.18);
+}
+.ss-option-label {
+  flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ss-kind-icon { color: var(--text-secondary); flex-shrink: 0; }
+.ss-check { color: #8ec07c; flex-shrink: 0; }
+
+.ss-empty, .ss-more {
+  padding: 8px 10px;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  text-align: center;
+}
+.ss-more { border-top: 1px solid rgba(255,255,255,0.04); }
+
+/* ═══ PERSONALITY PASS — shared controls ═══ */
+
+/* Personality overrides for .btn-primary removed — the base rule above is
+   now flat chrome, and the overrides added gradient / bounce back. */
+.btn-primary {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  border-radius: var(--chrome-radius-pill) !important;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn-primary:hover:not(:disabled) { transform: none; }
+.btn-primary:active:not(:disabled) { transform: none; }
+
+/* Soft focus ring on inputs */
+.input-base:focus {
+  border-color: var(--chrome-border-strong);
+  box-shadow: 0 0 0 3px rgba(243, 165, 182, 0.12), inset 0 1px 2px rgba(0,0,0,0.25);
+}
+
+/* Preset chips — flat chrome pills. No rotation, no gradient, no squircle. */
+.preset-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+.preset-btn {
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important; font-size: 0.74rem !important;
+  letter-spacing: 0.02em !important;
+  padding: 6px 12px !important;
+  border-radius: var(--chrome-radius-pill) !important;
+  background: transparent !important;
+  border: 1px solid var(--chrome-border) !important;
+  color: var(--chrome-fg-muted) !important;
+  box-shadow: none;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.preset-btn:nth-child(3n+1),
+.preset-btn:nth-child(3n+2),
+.preset-btn:nth-child(3n+3) { transform: none; }
+.preset-btn:hover:not(:disabled) {
+  transform: none;
+  background: var(--chrome-hover-bg);
+  color: var(--chrome-fg);
+  border-color: var(--chrome-border-strong);
+  box-shadow: none;
+}
+.preset-btn.profile-active {
+  background: var(--chrome-accent-bg) !important;
+  border-color: var(--chrome-accent-border) !important;
+  color: var(--chrome-accent) !important;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Tag / special-token chips — flat chrome, mono, no rotation */
+.tags-container {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.tag-btn {
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+  font-family: var(--chrome-font-mono) !important;
+  font-weight: 500 !important;
+  font-size: 0.66rem !important;
+  padding: 3px 9px !important;
+  border-radius: var(--chrome-radius-pill) !important;
+  background: transparent !important;
+  border: 1px solid var(--chrome-border) !important;
+  color: var(--chrome-fg-muted) !important;
+  cursor: pointer;
+}
+.tag-btn:hover {
+  transform: none;
+  background: var(--chrome-hover-bg) !important;
+  color: var(--chrome-fg) !important;
+  border-color: var(--chrome-border-strong) !important;
+}
+
+/* Chip-group for voice design attributes */
+.chip-group {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.chip-group .chip {
+  font-family: var(--font-sans);
+  font-weight: 500; font-size: 0.68rem;
+  padding: 3px 10px;
+  border-radius: var(--chrome-radius-pill);
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted); cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  white-space: nowrap;
+}
+.chip-group .chip:hover {
+  transform: none;
+  color: var(--chrome-fg);
+  background: var(--chrome-hover-bg);
+  border-color: var(--chrome-border-strong);
+}
+.chip-group .chip.active {
+  background: var(--chrome-accent-bg);
+  border-color: var(--chrome-accent-border);
+  color: var(--chrome-accent);
+  box-shadow: none;
+}
+
+/* Textarea — flat chrome surface for design/clone prompt box */
+textarea.input-base {
+  background: var(--chrome-bg);
+  font-family: var(--font-sans);
+  font-size: 0.82rem; line-height: 1.55;
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 12px 14px;
+}
+textarea.input-base:focus {
+  border-color: var(--chrome-border-strong);
+}
+textarea.input-base::placeholder {
+  color: var(--chrome-fg-dim);
+  font-style: normal;
+}
+
+/* ═══ GLOBAL POLISH — dub, modals, dropdowns, segments ═══ */
+
+/* Segment table — chrome header, subtle chrome hover on rows */
+.segment-table {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  overflow: hidden;
+}
+.segment-header {
+  font-family: var(--chrome-font-mono) !important;
+  font-weight: 600 !important;
+  font-size: var(--chrome-label-size) !important;
+  text-transform: uppercase;
+  letter-spacing: var(--chrome-label-track);
+  color: var(--chrome-fg-muted) !important;
+  background: var(--chrome-bg) !important;
+  border-bottom: 1px solid var(--chrome-border) !important;
+  padding: 6px 8px !important;
+}
+.segment-row {
+  transition: background var(--dur-fast);
+}
+.segment-row:hover {
+  background: var(--chrome-hover-bg) !important;
+}
+.segment-row.segment-active {
+  background: var(--chrome-accent-bg) !important;
+  box-shadow: inset 2px 0 0 var(--chrome-accent);
+}
+.segment-row.segment-done {
+  background: color-mix(in srgb, var(--chrome-severity-ok) 5%, transparent) !important;
+}
+
+/* Segment inner inputs — chrome focus */
+.segment-input {
+  font-family: var(--font-sans) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  transition: border-color var(--dur-fast), background var(--dur-fast) !important;
+}
+.segment-input:focus {
+  border-color: var(--chrome-border-strong) !important;
+  background: var(--chrome-hover-bg) !important;
+}
+
+.segment-play, .segment-del {
+  border-radius: var(--chrome-radius-pill) !important;
+  transition: background var(--dur-fast), color var(--dur-fast) !important;
+}
+.segment-play:hover, .segment-del:hover {
+  transform: none;
+}
+
+/* Override toggle + content */
+.override-content {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 12px 14px;
+  margin-top: 4px;
+}
+
+/* Searchable select popup — flat chrome, no warm gradient, no wobbly radius */
+.ss-popover, .ss-menu, .ss-dropdown {
+  background: var(--chrome-bg) !important;
+  border: 1px solid var(--chrome-border-strong) !important;
+  border-radius: var(--chrome-radius-pill) !important;
+  box-shadow: 0 14px 32px -14px rgba(0,0,0,0.6) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.ss-item {
+  font-family: var(--font-sans) !important;
+  color: var(--chrome-fg-muted) !important;
+}
+.ss-item:hover, .ss-item.active, .ss-highlighted {
+  background: var(--chrome-hover-bg) !important;
+  color: var(--chrome-fg) !important;
+}
+
+/* Transcript block */
+.override-toggle + div {
+  background: var(--chrome-bg) !important;
+  border-color: var(--chrome-border) !important;
+  border-radius: 0 0 var(--chrome-radius-pill) var(--chrome-radius-pill) !important;
+}
+
+/* Loader / spinner color to peach */
+.spinner { color: var(--chrome-accent) !important; }
+
+/* Range inputs — chrome-accent thumb, no glow halo. */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--chrome-accent);
+  border: 2px solid var(--chrome-bg);
+  box-shadow: none;
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--chrome-accent); border: 2px solid var(--chrome-bg); cursor: pointer;
+}
+
+/* Modal overlay — neutral backdrop */
+[style*="backdropFilter"][style*="rgba(0,0,0,0.8"],
+[style*="backdrop-filter"][style*="rgba(0,0,0,0.85"] {
+  background: rgba(0, 0, 0, 0.7) !important;
+}
+
+.glass-panel select.input-base {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+/* AudioTrimmer modal interior glass panel — flat chrome */
+.audio-trimmer,
+div[role="dialog"].audio-trimmer {
+  background: var(--chrome-bg) !important;
+  border: 1px solid var(--chrome-border-strong) !important;
+  border-radius: var(--chrome-radius-pill) !important;
+}
+
+/* Labels — chrome mono */
+.label-row {
+  font-family: var(--chrome-font-mono);
+  font-weight: 500;
+  color: var(--chrome-fg-muted);
+}
+.label-icon { color: var(--chrome-fg-muted) !important; }
+
+/* Override toggle (Production Overrides) — flat chrome */
+.override-toggle {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  border-radius: var(--chrome-radius-pill);
+}
+
+/* File drop zone — flat chrome, no squircle, no hover lift */
+.file-drag {
+  border-radius: var(--chrome-radius-pill) !important;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.file-drag:hover {
+  transform: none;
+}
+.file-drag p {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+/* Section tab buttons (sidebar) */
+/* Sidebar item — compact card with hover-reveal actions */
+.history-item {
+  border-radius: var(--chrome-radius-pill) !important;
+  background: transparent !important;
+  border: 1px solid var(--chrome-border) !important;
+  padding: 6px 8px !important;
+  margin-bottom: 3px;
+  position: relative;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.history-item::before {
+  content: ""; position: absolute; left: -1px; top: 10%; bottom: 10%; width: 2px;
+  background: var(--row-accent, var(--chrome-accent));
+  opacity: 0; transition: opacity var(--dur-fast);
+}
+.history-item:hover {
+  background: var(--chrome-hover-bg) !important;
+  border-color: var(--chrome-border-strong) !important;
+}
+.history-item:hover::before { opacity: 1; }
+.history-item.project-active {
+  background: color-mix(in srgb, #b8bb26 10%, transparent) !important;
+  border-color: color-mix(in srgb, #b8bb26 40%, transparent) !important;
+}
+.history-item.project-active::before {
+  opacity: 1; background: #b8bb26;
+}
+
+/* Header row: kind pill + time */
+.history-row-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; min-width: 0;
+}
+.history-kind {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size); font-weight: 600;
+  padding: 1px 7px; border-radius: var(--chrome-radius-pill);
+  letter-spacing: var(--chrome-label-track); text-transform: uppercase;
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  color: var(--chrome-fg-muted);
+  flex-shrink: 0;
+}
+.history-meta {
+  font-family: var(--chrome-font-mono);
+  font-size: 0.6rem; color: var(--chrome-fg-dim); font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Primary name/title line */
+.history-title {
+  font-family: var(--font-sans);
+  font-size: 0.78rem; font-weight: 600;
+  color: var(--chrome-fg); line-height: 1.2;
+  letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.history-subtitle {
+  font-family: var(--font-sans);
+  font-size: 0.62rem; color: var(--chrome-fg-dim); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Action row — visible on hover, always visible on focus-within */
+.history-actions {
+  display: flex; gap: 4px; margin-top: 2px;
+  opacity: 0; max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.2s, max-height 0.2s;
+}
+.history-item:hover .history-actions,
+.history-item:focus-within .history-actions {
+  opacity: 1; max-height: 40px;
+}
+.history-action-btn {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  color: var(--chrome-fg-muted);
+  font-family: var(--font-sans);
+  font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  white-space: nowrap;
+}
+.history-action-btn:hover {
+  background: var(--chrome-hover-bg);
+  color: var(--chrome-fg);
+  border-color: var(--chrome-border-strong);
+}
+.history-action-btn.danger:hover {
+  background: color-mix(in srgb, var(--chrome-severity-err) 12%, transparent);
+  color: var(--chrome-severity-err);
+  border-color: color-mix(in srgb, var(--chrome-severity-err) 45%, transparent);
+}
+.history-action-btn.accent:hover {
+  background: color-mix(in srgb, #b8bb26 12%, transparent);
+  color: #b8bb26;
+  border-color: color-mix(in srgb, #b8bb26 45%, transparent);
+}
+.history-action-icon {
+  width: 26px; flex: 0 0 auto; padding: 4px 6px;
+}
+
+/* Wobbly glass panels — applied broadly except sidebar/history panel */
+.glass-panel {
+  border-radius: 14px 18px 12px 20px / 16px 12px 18px 14px;
+}
+.glass-panel.history-panel,
+.glass-panel[data-square="1"] {
+  border-radius: 0;
+}
+
+/* Segment table — keep rectangular for virtualized rows */
+.segment-table,
+.segment-row,
+.segment-header {
+  border-radius: 0 !important;
+}
+
+/* ═══ SETTINGS PAGE ═══ */
+.settings-page {
+  flex: 1; display: flex; flex-direction: column; overflow-y: auto;
+  background: var(--chrome-bg);
+  padding: 28px 40px 48px;
+  font-family: var(--font-sans);
+}
+.settings-page h1 {
+  font-family: var(--font-sans);
+  font-weight: 600; font-size: 1.4rem; margin: 0 0 6px;
+  color: var(--chrome-fg); letter-spacing: -0.01em;
+}
+.settings-page .settings-subtitle {
+  color: var(--chrome-fg-muted); font-size: 0.78rem; margin-bottom: 24px;
+}
+/* Settings section — chrome-flat frame to match the rest of the app.
+   Keeps the content-forward padding; drops the warm gradient + squircle
+   corners + drop-shadow so it reads as a panel, not a jewel. */
+.settings-section {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 14px 18px; margin-bottom: 12px;
+}
+/* Section heading — chrome label, same typographic rhythm as "LOGS"
+   and sidebar section titles. */
+.settings-section h2 {
+  font-family: var(--chrome-font-mono);
+  font-size: var(--chrome-label-size);
+  font-weight: 600;
+  color: var(--chrome-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--chrome-label-track);
+  margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+}
+.settings-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--chrome-border);
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row .label { color: var(--chrome-fg); font-weight: 500; letter-spacing: 0.01em; }
+/* Informational readout, not a button — no pill shell. The monospace
+   font alone signals "this is data"; bg/border would masquerade as
+   interactive. */
+.settings-row .value {
+  color: var(--chrome-fg-muted);
+  font-family: var(--chrome-font-mono);
+  font-size: 0.76rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.settings-log {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--chrome-radius-pill);
+  padding: 10px 12px;
+  max-height: 280px; overflow: auto;
+  font-family: var(--chrome-font-mono);
+  font-size: 0.72rem; color: var(--chrome-fg-muted);
+  white-space: pre-wrap; word-break: break-word;
+}
+/* ═══ Settings — badge, tabs, subtabs migrated to ui/Badge + ui/Tabs + ui/Segmented ═══ */
+
+/* Studio panels — flat chrome surface. Radial warmth + paper grain removed
+   so Clone / Design / Dub panes sit on the same neutral frame as the rest
+   of the chrome-tokenized app. */
+.studio-panel {
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 0;
+  padding: 14px 16px;
+  position: relative;
+  overflow: auto;
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.studio-panel::before { display: none; }
+.studio-panel > * { position: relative; z-index: 1; }
+
+.studio-column {
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px; min-height: 0;
+}
+
+/* ═══ NAV RAIL ═══ */
+/* Flattened to chrome: same dark bg + hairline border as the top/bottom
+   bars so the three chrome edges (top, side, bottom) read as one frame.
+   Active-view indicator (accent bar + coloured button) still carries the
+   brand warmth; flipping-side tooltip labels are flattened too. */
+.nav-rail {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0;
+  background: var(--chrome-bg);
+  border-right: 1px solid var(--chrome-border);
+  gap: 6px;
+  user-select: none;
+}
+.nav-rail.rail-right {
+  border-right: none;
+  border-left: 1px solid var(--chrome-border);
+}
+.nav-rail .rail-top { display: flex; flex-direction: column; gap: 4px; flex: 1; align-items: center; }
+.nav-rail .rail-bottom { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+
+.rail-btn {
+  position: relative;
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--chrome-radius-pill);
+  color: var(--chrome-fg-dim);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.rail-btn:hover {
+  color: var(--chrome-fg);
+  background: var(--chrome-hover-bg);
+}
+.rail-btn.active {
+  color: var(--rail-accent, var(--chrome-accent));
+  background: color-mix(in srgb, var(--rail-accent, var(--chrome-accent)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--rail-accent, var(--chrome-accent)) 35%, transparent);
+}
+.rail-btn.active::before {
+  content: ""; position: absolute; left: -8px; top: 20%; bottom: 20%; width: 3px;
+  background: var(--rail-accent, #f3a5b6);
+  border-radius: 2px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--rail-accent, #f3a5b6) 50%, transparent);
+}
+.nav-rail.rail-right .rail-btn.active::before {
+  left: auto; right: -8px;
+}
+
+/* Hide text label (icons only) — but keep for a11y tooltip via title */
+.nav-rail { z-index: 50; }
+.rail-btn .rail-label {
+  position: absolute; left: 46px; top: 50%; transform: translate(-4px, -50%);
+  padding: 3px 8px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border-strong);
+  border-radius: var(--chrome-radius-pill);
+  color: var(--chrome-fg);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap; pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 10000;
+}
+.nav-rail.rail-right .rail-btn .rail-label {
+  left: auto; right: 48px;
+  transform: translate(4px, -50%);
+}
+.rail-btn:hover .rail-label {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.rail-btn.rail-flip {
+  margin-top: 6px;
+  border-top: 1px solid var(--chrome-border);
+  padding-top: 10px;
+  border-radius: 0;
+  height: 30px;
+  color: var(--chrome-fg-dim);
+}
+.rail-btn.rail-flip:hover {
+  color: var(--chrome-accent);
+  background: transparent;
+  transform: rotate(180deg);
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE — make every component adapt to viewport width
+   ════════════════════════════════════════════════════════════ */
+
+/* ── DubTab + CloneDesignTab split grids → single column ── */
+@media (max-width: 1000px) {
+  .dub-split-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr !important;
+  }
+  .clone-split-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .clone-split-grid .studio-column:first-child {
+    max-height: 45vh;
+  }
+}
+
+/* ── Grid utilities collapse ── */
+@media (max-width: 700px) {
+  .grid-2 { grid-template-columns: 1fr !important; }
+  .grid-3 { grid-template-columns: 1fr 1fr !important; }
+}
+@media (max-width: 500px) {
+  .grid-3 { grid-template-columns: 1fr !important; }
+  .grid-4 { grid-template-columns: 1fr 1fr !important; }
+}
+
+/* ── Launchpad ── */
+@media (max-width: 900px) {
+  .lp-hero { padding: 24px 20px 16px; }
+  .lp-hero h1 { font-size: 1.8rem; }
+  .lp-hero p { font-size: 0.85rem; }
+  .lp-actions { padding: 0 20px 16px; gap: 12px; flex-wrap: wrap; }
+  .lp-action-card { min-width: 0; flex: 1 1 200px; padding: 14px 12px; }
+  .lp-action-card:nth-child(1),
+  .lp-action-card:nth-child(2),
+  .lp-action-card:nth-child(3) { transform: none; }
+  .lp-section { padding: 0 20px 24px; }
+}
+@media (max-width: 640px) {
+  .lp-hero h1 { font-size: 1.4rem; }
+  .lp-hero p { font-size: 0.78rem; max-width: 100%; }
+  .lp-actions { flex-direction: column; padding: 0 12px 12px; }
+  .lp-action-card { min-height: auto; padding: 12px 10px; }
+  .lp-action-card h3 { font-size: 0.88rem; }
+  .lp-action-card .card-desc { font-size: 0.68rem; -webkit-line-clamp: 2; }
+  .lp-action-card .card-icon { width: 28px; height: 28px; }
+  .lp-section { padding: 0 12px 16px; }
+}
+
+/* ── Studio panels — tighter on small screens ── */
+@media (max-width: 800px) {
+  .studio-panel { padding: 10px 10px; }
+  .studio-panel .label-row { font-size: 0.68rem; }
+}
+@media (max-width: 600px) {
+  .studio-panel { padding: 8px 6px; }
+}
+
+/* ── DubTab settings bar wrap ── */
+@media (max-width: 900px) {
+  .dub-settings-bar {
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+  .dub-settings-bar > div { min-width: 0 !important; width: 100%; }
+}
+
+/* ── DubTab footer buttons — wrap on narrow ── */
+@media (max-width: 800px) {
+  .dub-footer-btns {
+    flex-wrap: wrap !important;
+  }
+  .dub-footer-btns .btn-primary {
+    min-width: 80px;
+    flex: 1 1 calc(50% - 4px) !important;
+  }
+}
+@media (max-width: 500px) {
+  .dub-footer-btns .btn-primary {
+    flex: 1 1 100% !important;
+  }
+}
+
+/* ── Segment table — tighter columns ── */
+@media (max-width: 800px) {
+  .segment-time { width: 45px !important; font-size: 0.58rem !important; }
+  .segment-row { padding: 2px 4px; }
+  .segment-header { padding: 2px 4px; font-size: 0.58rem; }
+}
+
+/* ── Waveform timeline — reduce height on small screens ── */
+@media (max-width: 800px) {
+  .waveform-container { height: 60px !important; }
+}
+
+/* ── Tabs — scroll instead of squish on narrow ── */
+@media (max-width: 600px) {
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { flex: 0 0 auto; padding: 5px 10px; font-size: 0.65rem; }
+}
+
+/* ── Preset grid — 2 columns on narrow ── */
+@media (max-width: 700px) {
+  .preset-grid { grid-template-columns: 1fr 1fr !important; }
+}
+@media (max-width: 500px) {
+  .preset-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ── Chip groups — wrap gracefully ── */
+.chip-group { flex-wrap: wrap; }
+
+/* ── Compare modal — stack on narrow ── */
+@media (max-width: 800px) {
+  .compare-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── General: prevent horizontal overflow everywhere ── */
+@media (max-width: 600px) {
+  body { font-size: 11px; }
+  .btn-primary { font-size: 0.7rem; padding: 5px 8px; }
+  .input-base { font-size: 0.7rem; }
+  select.input-base { font-size: 0.7rem; }
+}
+
+/* ═══ CAPTURE / DICTATION PILL HOST ═══ */
+/* Positions the CaptureWidget pill at top-center of the main window.
+   Non-blocking — no dark backdrop, no modal trap. */
+.capture-pill-host {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  pointer-events: none;
+}
+.capture-pill-host > * {
+  pointer-events: auto;
+}

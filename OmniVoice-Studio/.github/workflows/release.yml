@@ -1,0 +1,353 @@
+# Desktop release pipeline — self-updating binaries for mac/linux/windows.
+#
+# Triggers:
+#   - push of a tag matching `v*` (e.g. `v0.2.0`) → full release, publishes
+#     artifacts + signed updater manifest (`latest.json`) to GH Releases.
+#   - workflow_dispatch → on-demand build, uploads artifacts as workflow
+#     artifacts only (no release, no updater manifest).
+#
+# Strategy: matrix builds per target. Each runner produces a PyInstaller
+# frozen backend + Tauri bundle. `tauri-apps/tauri-action` signs the updater
+# payloads with TAURI_SIGNING_PRIVATE_KEY and uploads to the GH Release for
+# the tag. The built-in updater plugin polls the release's `latest.json` on
+# client boot.
+#
+# Windows/Linux support: first-pass enabled. Expect the first few runs on
+# each to surface PyInstaller/Tauri issues that never showed up locally on
+# macOS — iterate on CI.
+
+name: Desktop Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as draft release (tag push only)"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write    # needed to attach artifacts + updater manifest to GH Release
+
+env:
+  # Run all JavaScript actions on Node 24 (GH deprecates Node 20 in Sep 2026).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Fast gating job — runs backend pytest + frontend node:test + tsc on a
+  # single Linux runner. The matrix build below waits on this via `needs:`
+  # so we don't burn 4× platform-matrix minutes on a broken commit.
+  test:
+    name: Tests (backend + frontend)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # enable-cache persists ~/.cache/uv keyed on uv.lock.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Node 22 is needed for --experimental-strip-types so node:test can
+      # import .ts files directly from frontend/src/api/*.
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      # Backend tests need ffmpeg (subprocess calls in fixtures). Cache the
+      # resolved .debs so warm runs skip the apt-get update + install.
+      - name: System deps (ffmpeg)
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg
+          version: 1.0
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Run pytest
+        run: uv run pytest tests/ -q --tb=short
+
+      - name: Cache bun deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('frontend/bun.lock', 'bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: bun install
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: bunx tsc --noEmit
+
+      # Invoke node directly (not `bun run test`) because `bun run` auto-aliases
+      # `node` to `bun` in script bodies, and bun doesn't support
+      # --experimental-strip-types.
+      - name: Run frontend node:test
+        working-directory: frontend
+        run: node --experimental-strip-types --no-warnings --test ../tests/frontend/*.test.mjs
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: aarch64-apple-darwin
+            label: "macOS Apple Silicon"
+            rust_target: aarch64-apple-darwin
+            bundles: "app,dmg,updater"
+
+          # macOS Intel dropped: Apple shipped the last Intel Mac in 2023 and
+          # Rosetta 2 runs the ARM build natively. macos-13 runner backlog
+          # was also blocking every release tag for ~10 min.
+          # Windows: force MSI bundling via --bundles. NSIS fails at makensis
+          # because our PyInstaller payload approaches its ~2 GB stub limit.
+          - os: windows-2022
+            arch: x86_64-pc-windows-msvc
+            label: "Windows x64"
+            rust_target: x86_64-pc-windows-msvc
+            bundles: "msi,updater"
+
+          # Linux: ship .deb + .AppImage. AppImage is universal (no distro
+          # package-manager dep), runs on any glibc-2.31+ host. Now viable
+          # because the thin uv-venv installer is ~10 MB (vs the prior ~2 GB
+          # PyInstaller payload that exceeded linuxdeploy limits). FUSE
+          # unavailability on GH runners handled via APPIMAGE_EXTRACT_AND_RUN=1.
+          - os: ubuntu-22.04
+            arch: x86_64-unknown-linux-gnu
+            label: "Linux x64"
+            rust_target: x86_64-unknown-linux-gnu
+            bundles: "deb,appimage,updater"
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Language runtimes ──────────────────────────────────────────────
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      # Cache ~/.cargo/registry + {target}/ per rust_target. Cargo dep
+      # compile is the long pole of the build — cold is ~5-7 min, warm
+      # drops to ~1-2 min.
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+          key: ${{ matrix.rust_target }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      # ── Platform deps (Tauri host requirements only — no Python here) ─
+      # The runtime Python/uv bootstrap happens on the user's machine at
+      # first launch, not in CI. CI only packages the source (pyproject.toml,
+      # uv.lock, backend/*.py) into the Tauri installer as resources.
+      - name: macOS system deps
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg || true
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev ffmpeg
+
+      # ── Frontend build ─────────────────────────────────────────────────
+      - name: Cache bun deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('frontend/bun.lock', 'bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: bun install
+
+      # ── Tauri build + sign + publish ───────────────────────────────────
+      # tauri-action handles: bundle, sign updater payload with the
+      # TAURI_SIGNING_PRIVATE_KEY secret, attach to release, update
+      # latest.json with per-platform download URLs & signatures. The
+      # installer ships the repo's pyproject.toml + uv.lock + backend/
+      # tree as Tauri resources; lib.rs::ensure_venv_ready recreates the
+      # venv on first launch via `uv sync --frozen --no-dev`.
+      # Fetch the standalone `uv` binary for the current matrix target and
+      # drop it at `binaries/uv-<rust-target-triple>{ext}`. tauri.conf.json
+      # references `binaries/uv` via `bundle.externalBin`, and tauri-bundler
+      # picks up the per-target file automatically. The runtime then uses
+      # the bundled binary instead of downloading uv on first launch.
+      #
+      # Pinned uv version mirrors the `UV_VERSION` constant in lib.rs; bump
+      # both together when refreshing.
+      - name: Bundle uv (${{ matrix.rust_target }})
+        shell: bash
+        env:
+          UV_VERSION: "0.11.7"
+          TRIPLE: ${{ matrix.rust_target }}
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/src-tauri/binaries
+          case "$TRIPLE" in
+            aarch64-apple-darwin|x86_64-apple-darwin|x86_64-unknown-linux-gnu)
+              ARCHIVE="tar.gz"
+              ;;
+            x86_64-pc-windows-msvc)
+              ARCHIVE="zip"
+              ;;
+            *)
+              echo "Unsupported target for uv bundling: $TRIPLE"
+              exit 1
+              ;;
+          esac
+          URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${TRIPLE}.${ARCHIVE}"
+          echo "Fetching $URL"
+          WORK=$(mktemp -d)
+          if [ "$ARCHIVE" = "zip" ]; then
+            curl -fsSL "$URL" -o "$WORK/uv.zip"
+            unzip -j -o "$WORK/uv.zip" -d "$WORK"
+            mv "$WORK/uv.exe" "frontend/src-tauri/binaries/uv-${TRIPLE}.exe"
+          else
+            curl -fsSL "$URL" | tar -xz -C "$WORK"
+            mv "$WORK/uv-${TRIPLE}/uv" "frontend/src-tauri/binaries/uv-${TRIPLE}"
+            chmod +x "frontend/src-tauri/binaries/uv-${TRIPLE}"
+          fi
+          ls -la "frontend/src-tauri/binaries/"
+
+      # Download static ffmpeg + ffprobe binaries and drop them into the
+      # Tauri sidecar directory. Sources:
+      #   macOS:         evermeet.cx — individual .zip per binary (x86_64,
+      #                  runs fine on Apple Silicon via Rosetta 2)
+      #   Linux/Windows: BtbN/FFmpeg-Builds — single archive with both bins
+      - name: Bundle ffmpeg + ffprobe (${{ matrix.rust_target }})
+        shell: bash
+        env:
+          TRIPLE: ${{ matrix.rust_target }}
+        run: |
+          set -euo pipefail
+          BINDIR="frontend/src-tauri/binaries"
+          mkdir -p "$BINDIR"
+          WORK=$(mktemp -d)
+
+          case "$TRIPLE" in
+            aarch64-apple-darwin|x86_64-apple-darwin)
+              # evermeet.cx ships each binary as a separate .zip containing
+              # a single x86_64 Mach-O executable (runs via Rosetta on arm64).
+              for TOOL in ffmpeg ffprobe; do
+                if [ "$TOOL" = "ffmpeg" ]; then
+                  URL="https://evermeet.cx/ffmpeg/getrelease/zip"
+                else
+                  URL="https://evermeet.cx/ffmpeg/getrelease/${TOOL}/zip"
+                fi
+                echo "Fetching $TOOL from evermeet.cx"
+                curl -fsSL "$URL" -o "$WORK/${TOOL}.zip"
+                unzip -o -j "$WORK/${TOOL}.zip" -d "$WORK"
+                mv "$WORK/${TOOL}" "$BINDIR/${TOOL}-${TRIPLE}"
+                chmod +x "$BINDIR/${TOOL}-${TRIPLE}"
+              done
+              ;;
+            x86_64-unknown-linux-gnu)
+              URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+              echo "Fetching ffmpeg from BtbN (linux64)"
+              curl -fsSL "$URL" -o "$WORK/ffmpeg.tar.xz"
+              tar -xJf "$WORK/ffmpeg.tar.xz" -C "$WORK"
+              # Archive extracts to ffmpeg-master-latest-linux64-gpl/bin/
+              EXTRACTED=$(find "$WORK" -type d -name "bin" | head -1)
+              mv "$EXTRACTED/ffmpeg"  "$BINDIR/ffmpeg-${TRIPLE}"
+              mv "$EXTRACTED/ffprobe" "$BINDIR/ffprobe-${TRIPLE}"
+              chmod +x "$BINDIR/ffmpeg-${TRIPLE}" "$BINDIR/ffprobe-${TRIPLE}"
+              ;;
+            x86_64-pc-windows-msvc)
+              URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+              echo "Fetching ffmpeg from BtbN (win64)"
+              curl -fsSL "$URL" -o "$WORK/ffmpeg.zip"
+              unzip -o "$WORK/ffmpeg.zip" -d "$WORK"
+              EXTRACTED=$(find "$WORK" -type f -name "ffmpeg.exe" | head -1)
+              EXTRACTED_DIR=$(dirname "$EXTRACTED")
+              mv "$EXTRACTED_DIR/ffmpeg.exe"  "$BINDIR/ffmpeg-${TRIPLE}.exe"
+              mv "$EXTRACTED_DIR/ffprobe.exe" "$BINDIR/ffprobe-${TRIPLE}.exe"
+              ;;
+            *)
+              echo "⚠ No ffmpeg bundling for target: $TRIPLE (will download at first run)"
+              ;;
+          esac
+          ls -la "$BINDIR/"
+
+
+      # Extract the matching CHANGELOG.md section so the release body has
+      # real notes instead of "see commit log". Falls back to a one-liner
+      # if the tag has no matching `## [X.Y.Z]` section yet — keeps the
+      # release publishable even when CHANGELOG hasn't been updated.
+      - name: Extract CHANGELOG section for tag
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          BODY=""
+          if [ -f CHANGELOG.md ]; then
+            BODY=$(awk -v tag="$TAG" '
+              /^## \[/ {
+                if (in_section) exit
+                if ($0 ~ "\\[" tag "\\]") { in_section = 1; next }
+              }
+              in_section { print }
+            ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
+          fi
+          if [ -z "$BODY" ]; then
+            BODY="Auto-generated release for ${GITHUB_REF_NAME}. See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) and the commit log for details."
+          fi
+          {
+            echo 'body<<RELEASE_BODY_EOF'
+            echo "$BODY"
+            echo 'RELEASE_BODY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build + release (Tauri)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # GH runners disable FUSE, so linuxdeploy's AppImage can't mount
+          # itself at bundle time. This env tells linuxdeploy to extract-and-run
+          # instead, which works without FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        with:
+          projectPath: frontend
+          args: --target ${{ matrix.rust_target }} --bundles ${{ matrix.bundles }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "OmniVoice Studio ${{ github.ref_name }}"
+          releaseBody: ${{ steps.changelog.outputs.body }}
+          releaseDraft: ${{ inputs.draft || 'true' }}
+          prerelease: false
+          updaterJsonPreferNsis: false
+          includeUpdaterJson: true

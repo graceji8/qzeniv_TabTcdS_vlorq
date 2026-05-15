@@ -736,18 +736,19 @@ def main():
 
                 # Download
                 print(f"Downloading audio for {person}...", flush=True)
-                query = f"{person} speaking speech"
+                query = f"{person} speaking speech original voice -interpreter -dubbed -translated -translator"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
                 def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
                     cmd = [
                         sys.executable, "-m", "yt_dlp",
                         f"{search_prefix}{_query}",
-                        "-f", "worst",
+                        "-f", "ba*[language=en]/ba*[language=orig]/ba/worst",
                         "-x", "--audio-format", "wav",
                         "-o", _full_wav,
                         "--write-info-json",
-                        "--no-playlist", "--retries", "3", "--socket-timeout", "30"
+                        "--no-playlist", "--retries", "3", "--socket-timeout", "30",
+                        "--extractor-args", "youtube:player-client=web,android"
                     ]
                     is_youtube = search_prefix.startswith("ytsearch")
                     if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):

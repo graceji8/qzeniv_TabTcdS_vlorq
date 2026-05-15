@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e1e2e"/>
+      <stop offset="100%" stop-color="#13131f"/>
+    </linearGradient>
+
+    <!-- Waveform pink gradient -->
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8a4b8"/>
+      <stop offset="50%" stop-color="#d3869b"/>
+      <stop offset="100%" stop-color="#c07090"/>
+    </linearGradient>
+
+    <!-- Glow filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 0.4 0 0 0  0 0 0.5 0 0  0 0 0 0.6 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle inner shadow -->
+    <filter id="inset" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feOffset dx="0" dy="3" result="offset"/>
+      <feComposite in="SourceGraphic" in2="offset" operator="over"/>
+    </filter>
+
+    <!-- Edge highlight -->
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#bg)"/>
+
+  <!-- Edge/border highlight -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="none" stroke="url(#edge)" stroke-width="2"/>
+
+  <!-- Central waveform bars (audio visualizer style) -->
+  <g transform="translate(256, 256)" filter="url(#glow)">
+    <!-- 7 bars, symmetric heights, rounded caps -->
+    <rect x="-120" y="-30"  width="20" height="60"  rx="10" fill="url(#wave)" opacity="0.7"/>
+    <rect x="-84"  y="-55"  width="20" height="110" rx="10" fill="url(#wave)" opacity="0.85"/>
+    <rect x="-48"  y="-80"  width="20" height="160" rx="10" fill="url(#wave)" opacity="0.95"/>
+    <rect x="-10"  y="-100" width="20" height="200" rx="10" fill="url(#wave)"/>
+    <rect x="28"   y="-75"  width="20" height="150" rx="10" fill="url(#wave)" opacity="0.95"/>
+    <rect x="64"   y="-50"  width="20" height="100" rx="10" fill="url(#wave)" opacity="0.85"/>
+    <rect x="100"  y="-25"  width="20" height="50"  rx="10" fill="url(#wave)" opacity="0.7"/>
+  </g>
+
+  <!-- Subtle circle ring behind bars -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#d3869b" stroke-width="1.5" opacity="0.15"/>
+</svg>

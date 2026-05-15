@@ -168,11 +168,12 @@ jobs:
               print(f"Google Drive restore failed (non-fatal): {e}")
           PYEOF
 
-      # ── 10. Pull OmniVoice-Studio Docker image ────────────────────────────────
-      - name: Pull OmniVoice-Studio Docker image
+      # ── 10. Build OmniVoice-Studio Docker image ───────────────────────────────
+      - name: Build OmniVoice-Studio Docker image
         run: |
-          docker pull ghcr.io/debpalash/omnivoice-studio:latest
-          echo "Image pulled"
+          cd OmniVoice-Studio
+          docker build -f deploy/Dockerfile -t ghcr.io/debpalash/omnivoice-studio:latest .
+          echo "Image built locally"
 
       # ── 11. Start OmniVoice-Studio container ──────────────────────────────────
       # Mount ~/.cache/huggingface into the container so the model is already

@@ -1,0 +1,23 @@
+/* Table body specific styles — chrome comes from ui/Table. */
+
+.dub-segment-table__header {
+  padding: 3px 4px !important;
+  gap: 3px !important;
+}
+
+.dub-segment-table__body { flex: 1; min-height: 0; }
+
+.dub-segment-table__select-all {
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.dub-segment-table__select-all input[type="checkbox"] {
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+
+.dub-segment-table__spk-filter { min-width: 80px; }
+
+.dub-segment-table__sel-count { color: var(--color-brand); }
