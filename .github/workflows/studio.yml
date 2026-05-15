@@ -323,8 +323,8 @@ jobs:
               \"services\":[\"omnivoice-ui\",\"omnivoice-api\",\"ssh\"]
             }"
 
-      # ── 14. Run process_famous_people.py ──────────────────────────────────────
-      - name: Run process_famous_people.py
+      # ── 14. Run process_voice_gallery.py ──────────────────────────────────────
+      - name: Run process_voice_gallery.py
         if: ${{ github.event.inputs.skip_pipeline != 'true' && github.event.inputs.debug_mode != 'true' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -349,7 +349,7 @@ jobs:
 
           [ ! -f /tmp/.X99-lock ] && Xvfb :99 -screen 0 1920x1080x24 & sleep 2
 
-          python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
+          python scripts/process_voice_gallery.py 2>&1 | tee logs/process_voice_gallery.log
 
       # ── 15. Keep Server Alive ───────────────────────────────────────────────
       - name: Keep Server Alive

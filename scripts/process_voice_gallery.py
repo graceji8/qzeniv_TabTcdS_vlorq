@@ -532,23 +532,28 @@ def generate_famous_people_with_ai(service=None):
     
     return filtered_people
 
-# 1. Get the famous people list from Google Drive or Generate it
-def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate=False):
+# 1. Get the voice gallery list from Markdown
+def get_voice_gallery_list():
+    import os
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    md_path = os.path.join(script_dir, "..", "OmniVoice-Studio", "Voice_Gallery_Download_Lists.md")
+    
+    # Fetch processed people cache first to avoid re-downloading if already processed
+    from upload_results import get_drive_service
     service = get_drive_service()
-
-    if not service:
-        print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
-        return generate_famous_people_with_ai(None)
-
-    # Fetch processed people cache first
-    fetch_processed_people(service)
-
-    # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
-    people = generate_famous_people_with_ai(service)
-
-    if people:
-        people.sort(key=lambda x: 0 if "politician" in x.lower() else 1)
-
+    if service:
+        fetch_processed_people(service)
+    
+    people = []
+    if os.path.exists(md_path):
+        with open(md_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and "|" in line and not line.startswith("#"):
+                    people.append(line)
+    else:
+        print(f"File not found: {md_path}")
+        
     return people
 
 def download_model_from_drive(service, local_model_path, folder_name="OmniVoice_model"):
@@ -756,12 +761,13 @@ def main():
         print(f"  ROUND {round_num} — Fetching fresh list from Drive", flush=True)
         print(f"{'#'*40}", flush=True)
 
-        # Round 1: use existing Drive list if available
-        # Round 2+: always generate a fresh AI list
-        famous_people_data = get_famous_people_from_drive(
-            "famous_people.txt",
-            force_regenerate=(round_num > 1)
-        )
+        # Fetch the list from our Voice Gallery Markdown file
+        famous_people_data = get_voice_gallery_list()
+
+        # If round > 1, it means we finished processing the static list. Break out!
+        if round_num > 1:
+            print("Finished processing all items from Voice Gallery list. Exiting loop.")
+            break
 
         if not famous_people_data:
             print("No people found. Waiting 60s before retrying...", flush=True)
