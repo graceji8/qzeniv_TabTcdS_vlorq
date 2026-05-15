@@ -533,7 +533,8 @@ def main():
     model_path = 'k2-fsa/OmniVoice'
     local_model_path = os.path.join(script_dir, "models", "OmniVoice")
     
-    if os.path.exists(local_model_path) and os.listdir(local_model_path):
+    has_local_weights = any(os.path.exists(os.path.join(local_model_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
+    if os.path.exists(local_model_path) and has_local_weights:
         checkpoint(f"Local model found! Loading from: {local_model_path}")
         model_path = local_model_path
     else:
@@ -581,7 +582,8 @@ def main():
         # Check if ASR model is cached on Google Drive
         service = get_drive_service()
         asr_local_path = os.path.join(script_dir, "models", "OmniVoice_ASR")
-        if service and not (os.path.exists(asr_local_path) and os.listdir(asr_local_path)):
+        has_asr_weights = os.path.exists(asr_local_path) and any(os.path.exists(os.path.join(asr_local_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
+        if service and not has_asr_weights:
             checkpoint("Checking for ASR model on Google Drive...")
             signal.alarm(300)
             try:
