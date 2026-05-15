@@ -137,6 +137,7 @@ def get_drive_folder_contents(service, folder_id):
         return {}
 
     try:
+        page_token = None
         while True:
             results = service.files().list(
                 q=query, 
@@ -151,7 +152,8 @@ def get_drive_folder_contents(service, folder_id):
             if not page_token:
                 break
         return files_dict
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: Error listing contents of folder '{folder_id}': {e}")
         return {}
 
 def create_drive_folder(service, folder_name, parent_id=None):
