@@ -16,14 +16,53 @@ import torch
 import logging
 import transformers
 import huggingface_hub
+import socket
+import signal
+from datetime import datetime
 from omnivoice import OmniVoice
 from upload_results import get_drive_service
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+
+# Set global socket timeout to 60 seconds
+socket.setdefaulttimeout(60)
+
+def checkpoint(msg):
+    """Print timestamped message to track execution progress."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] CHECKPOINT: {msg}", flush=True)
+
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException("Operation timed out!")
+
+def check_proxy_readiness():
+    """Verify that the SSH SOCKS proxy is actually working."""
+    checkpoint("Checking SOCKS proxy readiness...")
+    proxies = {
+        "http": "socks5h://127.0.0.1:1080",
+        "https": "socks5h://127.0.0.1:1080",
+    }
+    try:
+        # Try a small request to HF or Google
+        response = requests.get("https://huggingface.co", proxies=proxies, timeout=15)
+        if response.status_code == 200:
+            checkpoint("Proxy is READY and reachable.")
+            return True
+        else:
+            checkpoint(f"Proxy check returned unexpected status: {response.status_code}")
+    except Exception as e:
+        checkpoint(f"Proxy check FAILED: {e}")
+    return False
 
 # Suppress warnings
 transformers.logging.set_verbosity_error()
 logging.getLogger("transformers").setLevel(logging.ERROR)
 huggingface_hub.logging.set_verbosity_error()
+
+_VAD_MODEL = None
+_VAD_UTILS = None
 
 def _is_valid_cookies_file(path):
     try:
@@ -36,29 +75,54 @@ def _is_valid_cookies_file(path):
     except Exception:
         return False
 
-def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
-    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...")
+def get_vad_model():
+    """Load Silero VAD once per process instead of once per audio file."""
+    global _VAD_MODEL, _VAD_UTILS
+    if _VAD_MODEL is not None and _VAD_UTILS is not None:
+        return _VAD_MODEL, _VAD_UTILS
+
+    checkpoint("Loading Silero VAD model (torch.hub.load)...")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         old_http = os.environ.get("http_proxy")
         old_https = os.environ.get("https_proxy")
+        # Silero VAD loading often fails with proxy due to GitHub/S3 interactions
         if "http_proxy" in os.environ: del os.environ["http_proxy"]
         if "https_proxy" in os.environ: del os.environ["https_proxy"]
+        
+        # Set 3-minute alarm for VAD load
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(180)
+        
         try:
-            model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                          model='silero_vad',
-                                          force_reload=False,
-                                          onnx=False,
-                                          trust_repo=True)
+            _VAD_MODEL, _VAD_UTILS = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                                    model='silero_vad',
+                                                    force_reload=False,
+                                                    onnx=False,
+                                                    trust_repo=True)
+            checkpoint("Silero VAD model loaded successfully.")
+        except TimeoutException:
+            checkpoint("ERROR: Silero VAD loading TIMED OUT (3 min limit).")
+            # Fallback or exit? If VAD fails, we can't process audio.
+            # We'll try to continue but expect failures.
+            pass
+        except Exception as e:
+            checkpoint(f"Silero VAD loading failed: {e}")
         finally:
+            signal.alarm(0) # Disable alarm
             if old_http: os.environ["http_proxy"] = old_http
             if old_https: os.environ["https_proxy"] = old_https
+    return _VAD_MODEL, _VAD_UTILS
+
+def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
+    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...", flush=True)
+    model, utils = get_vad_model()
     get_speech_timestamps = utils[0]
     
     try:
         data, samplerate = sf.read(full_wav_path)
     except Exception as e:
-        print(f"Error reading audio: {e}")
+        print(f"Error reading audio: {e}", flush=True)
         return False
         
     # Process only the first 5 minutes to save memory/time
@@ -80,7 +144,7 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     speech_timestamps = get_speech_timestamps(wav_16k, model, sampling_rate=16000, threshold=0.65)
     
     if not speech_timestamps:
-        print("No speech detected by AI.")
+        print("No speech detected by AI.", flush=True)
         return False
         
     target_samples_16k = int(target_duration * 16000)
@@ -101,7 +165,7 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
     start_sample = int(best_segment['start'] * samplerate / 16000)
     end_sample = int(best_segment['end'] * samplerate / 16000)
     
-    print(f"AI selected clear speech segment from {start_sample/samplerate:.2f}s to {end_sample/samplerate:.2f}s")
+    print(f"AI selected clear speech segment from {start_sample/samplerate:.2f}s to {end_sample/samplerate:.2f}s", flush=True)
     
     extracted_data = data[start_sample:end_sample]
     sf.write(ref_wav_path, extracted_data, samplerate)
@@ -109,7 +173,7 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
 
 def generate_famous_people_with_ai(service=None):
     import random
-    print("Generating list of famous people using AI...")
+    print("Generating list of famous people using AI...", flush=True)
     
     avoid_list = []
     if service:
@@ -144,7 +208,7 @@ def generate_famous_people_with_ai(service=None):
     # Try GitHub Models if GH_MODELS_TOKEN or GITHUB_TOKEN exists
     github_token = os.environ.get("GH_MODELS_TOKEN") or os.environ.get("GIT_MODEL_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if github_token:
-        print(f"DEBUG: github_token detected (length: {len(github_token)})")
+        print(f"DEBUG: github_token detected (length: {len(github_token)})", flush=True)
         try:
             response = requests.post(
                 "https://models.inference.ai.azure.com/chat/completions",
@@ -171,7 +235,7 @@ def generate_famous_people_with_ai(service=None):
     # Try Cloudflare Workers AI if CLOUDFLARE_ACCOUNTS_JSON exists
     cf_accounts_env = os.environ.get("CLOUDFLARE_ACCOUNTS_JSON")
     if cf_accounts_env:
-        print("DEBUG: CLOUDFLARE_ACCOUNTS_JSON detected.")
+        print("DEBUG: CLOUDFLARE_ACCOUNTS_JSON detected.", flush=True)
         try:
             import json
             import random
@@ -208,7 +272,7 @@ def generate_famous_people_with_ai(service=None):
     # Try OpenAI if OPENAI_API_KEY exists
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
-        print(f"DEBUG: OPENAI_API_KEY detected (length: {len(api_key)})")
+        print(f"DEBUG: OPENAI_API_KEY detected (length: {len(api_key)})", flush=True)
         try:
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -255,7 +319,7 @@ def generate_famous_people_with_ai(service=None):
             # Quietly note that local AI is unavailable
             pass
         
-    print("AI generation failed for this round. Using fallback list.")
+    print("AI generation failed for this round. Using fallback list.", flush=True)
     # Add a small delay if AI fails to prevent rapid looping
     time.sleep(5)
     
@@ -320,7 +384,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
     service = get_drive_service()
 
     if not service:
-        print("Could not get Google Drive service. Falling back to AI generation without avoid list.")
+        print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
         return generate_famous_people_with_ai(None)
 
     # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
@@ -345,7 +409,7 @@ def download_model_from_drive(service, local_model_path, folder_name="OmniVoice_
         return False
     
     os.makedirs(local_model_path, exist_ok=True)
-    print(f"Downloading {len(contents)} model files from Google Drive...")
+    print(f"Downloading {len(contents)} model files from Google Drive...", flush=True)
     
     for fname, finfo in contents.items():
         local_file = os.path.join(local_model_path, fname)
@@ -384,74 +448,123 @@ def upload_model_to_drive(service, local_model_path, folder_name="OmniVoice_mode
             except Exception as e:
                 print(f"  Failed to upload {fname}: {e}")
     
-    print("Model uploaded to Google Drive.")
+    print("Model uploaded to Google Drive.", flush=True)
 
 def main():
-    print("Loading OmniVoice model...")
+    checkpoint("Starting process_famous_people.py")
+    
+    # Check proxy first
+    if not check_proxy_readiness():
+        checkpoint("WARNING: Proxy not ready. HF/YouTube downloads may fail.")
+
+    checkpoint("Initializing OmniVoice model setup...")
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     model_path = 'k2-fsa/OmniVoice'
     local_model_path = os.path.join(script_dir, "models", "OmniVoice")
     
     if os.path.exists(local_model_path) and os.listdir(local_model_path):
-        print(f"Local model found! Loading from: {local_model_path}")
+        checkpoint(f"Local model found! Loading from: {local_model_path}")
         model_path = local_model_path
     else:
         # Try downloading from Google Drive first
+        checkpoint("Searching for OmniVoice model on Google Drive...")
         service = get_drive_service()
-        if service and download_model_from_drive(service, local_model_path):
-            print(f"Model loaded from Google Drive cache.")
-            model_path = local_model_path
-        else:
-            print(f"Downloading from Hugging Face: {model_path}")
-            # After loading, we'll save to Drive
-    
-    model = OmniVoice.from_pretrained(model_path)
+        if service:
+            try:
+                # Set alarm for Drive download (5 mins)
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(300)
+                if download_model_from_drive(service, local_model_path):
+                    checkpoint(f"Model loaded from Google Drive cache.")
+                    model_path = local_model_path
+                else:
+                    checkpoint("Model not found on Google Drive.")
+            except TimeoutException:
+                checkpoint("ERROR: Google Drive model download TIMED OUT.")
+            finally:
+                signal.alarm(0)
+        
+        if model_path == 'k2-fsa/OmniVoice':
+            checkpoint(f"Will download from Hugging Face: {model_path}")
+
+    checkpoint(f"Calling OmniVoice.from_pretrained({model_path})...")
+    try:
+        # Set alarm for HF download/load (10 mins)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(600)
+        model = OmniVoice.from_pretrained(model_path)
+        checkpoint("OmniVoice model ready.")
+    except TimeoutException:
+        checkpoint("ERROR: OmniVoice model loading TIMED OUT (10 min limit).")
+        return # Cannot proceed without model
+    except Exception as e:
+        checkpoint(f"ERROR: OmniVoice loading failed: {e}")
+        return
+    finally:
+        signal.alarm(0)
     
     # Pre-load the ASR model (try Google Drive cache first, then HuggingFace)
-    print("Pre-loading ASR model...")
+    checkpoint("Pre-loading ASR model...")
     asr_downloaded_from_hf = False
     try:
         # Check if ASR model is cached on Google Drive
         service = get_drive_service()
         asr_local_path = os.path.join(script_dir, "models", "OmniVoice_ASR")
         if service and not (os.path.exists(asr_local_path) and os.listdir(asr_local_path)):
-            if download_model_from_drive(service, asr_local_path, folder_name="OmniVoice_ASR_model"):
-                # Set HF cache env so OmniVoice finds it
-                os.environ["HF_HUB_CACHE"] = os.path.dirname(asr_local_path)
-                print("ASR model loaded from Google Drive cache.")
+            checkpoint("Checking for ASR model on Google Drive...")
+            signal.alarm(300)
+            try:
+                if download_model_from_drive(service, asr_local_path, folder_name="OmniVoice_ASR_model"):
+                    # Set HF cache env so OmniVoice finds it
+                    os.environ["HF_HUB_CACHE"] = os.path.dirname(asr_local_path)
+                    checkpoint("ASR model loaded from Google Drive cache.")
+            finally:
+                signal.alarm(0)
     except Exception as e:
-        print(f"ASR Drive cache check: {e}")
+        checkpoint(f"ASR Drive cache check exception: {e}")
     
+    checkpoint("Calling model.load_asr_model()...")
     try:
+        signal.alarm(600)
         model.load_asr_model()
-        print("ASR model ready.")
+        checkpoint("ASR model initialized.")
         asr_downloaded_from_hf = True
+    except TimeoutException:
+        checkpoint("ERROR: ASR model loading TIMED OUT.")
     except Exception as e:
-        print(f"ASR model pre-load note: {e}")
+        checkpoint(f"ASR model pre-load note: {e}")
+    finally:
+        signal.alarm(0)
     
     # Cache models to Google Drive for next time
+    checkpoint("Entering model caching phase...")
     service = get_drive_service()
     if service:
         # Cache OmniVoice model
         if model_path == 'k2-fsa/OmniVoice':
             try:
+                checkpoint("Downloading snapshot for OmniVoice to cache to Drive...")
                 from huggingface_hub import snapshot_download
                 hf_local = snapshot_download(repo_id='k2-fsa/OmniVoice')
-                print("Caching OmniVoice model to Google Drive...")
-                upload_model_to_drive(service, hf_local, folder_name="OmniVoice_model")
+                checkpoint(f"Snapshot downloaded to {hf_local}. Uploading to Drive...")
+                # Set a 5 min limit for upload
+                signal.alarm(300)
+                try:
+                    upload_model_to_drive(service, hf_local, folder_name="OmniVoice_model")
+                finally:
+                    signal.alarm(0)
             except Exception as e:
-                print(f"Could not cache OmniVoice model to Drive: {e}")
+                checkpoint(f"Could not cache OmniVoice model to Drive: {e}")
         
         # Cache ASR model
         if asr_downloaded_from_hf:
             try:
-                from huggingface_hub import snapshot_download
-                # Find the ASR model path from HF cache
                 import upload_results
                 asr_folder_id = upload_results.get_drive_folder_id(service, "OmniVoice_ASR_model")
                 if not asr_folder_id:
-                    # Try to find the ASR model in HF cache and upload
+                    checkpoint("ASR model not on Drive. Searching HF cache for upload...")
+                    # Find the ASR model in HF cache and upload
                     hf_cache = os.path.expanduser("~/.cache/huggingface/hub")
                     if os.path.exists(hf_cache):
                         for d in os.listdir(hf_cache):
@@ -462,11 +575,17 @@ def main():
                                     subdirs = os.listdir(snap)
                                     if subdirs:
                                         asr_path = os.path.join(snap, subdirs[0])
-                                        print(f"Caching ASR model to Google Drive from {asr_path}...")
-                                        upload_model_to_drive(service, asr_path, folder_name="OmniVoice_ASR_model")
+                                        checkpoint(f"Caching ASR model to Google Drive from {asr_path}...")
+                                        signal.alarm(300)
+                                        try:
+                                            upload_model_to_drive(service, asr_path, folder_name="OmniVoice_ASR_model")
+                                        finally:
+                                            signal.alarm(0)
                                         break
             except Exception as e:
-                print(f"Could not cache ASR model to Drive: {e}")
+                checkpoint(f"Could not cache ASR model to Drive: {e}")
+    
+    checkpoint("Model initialization and caching complete. Starting processing loop.")
     
     upload_script = os.path.join(script_dir, "upload_results.py")
 
@@ -475,9 +594,9 @@ def main():
 
     while True:
         round_num += 1
-        print(f"\n{'#'*40}")
-        print(f"  ROUND {round_num} — Fetching fresh list from Drive")
-        print(f"{'#'*40}")
+        print(f"\n{'#'*40}", flush=True)
+        print(f"  ROUND {round_num} — Fetching fresh list from Drive", flush=True)
+        print(f"{'#'*40}", flush=True)
 
         # Round 1: use existing Drive list if available
         # Round 2+: always generate a fresh AI list
@@ -487,7 +606,7 @@ def main():
         )
 
         if not famous_people_data:
-            print("No people found. Waiting 60s before retrying...")
+            print("No people found. Waiting 60s before retrying...", flush=True)
             time.sleep(60)
             continue
 
@@ -495,9 +614,9 @@ def main():
         batches = [famous_people_data[i:i+batch_size] for i in range(0, len(famous_people_data), batch_size)]
 
         for batch_idx, batch in enumerate(batches):
-            print(f"\n{'='*40}")
-            print(f"  Batch {batch_idx+1}/{len(batches)} of Round {round_num}")
-            print(f"{'='*40}")
+            print(f"\n{'='*40}", flush=True)
+            print(f"  Batch {batch_idx+1}/{len(batches)} of Round {round_num}", flush=True)
+            print(f"{'='*40}", flush=True)
 
             for item in batch:
                 if "|" in item:
@@ -508,7 +627,7 @@ def main():
                     person = item.strip()
                     sample_text = "You're so lucky. You are so lucky to be an opera singer. I mean this."
 
-                print(f"\nProcessing: {person}")
+                print(f"\nProcessing: {person}", flush=True)
 
                 folder_name = person.replace(" ", "_")
 
@@ -522,7 +641,7 @@ def main():
                         if person_folder_id:
                             contents = upload_results.get_drive_folder_contents(service, person_folder_id)
                             if "cloned.wav" in contents:
-                                print(f"Skipping {person} — cloned.wav already exists on Google Drive.")
+                                print(f"Skipping {person} — cloned.wav already exists on Google Drive.", flush=True)
                                 continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
                 os.makedirs(temp_base, exist_ok=True)
@@ -540,7 +659,7 @@ def main():
                         os.remove(f)
 
                 # Download
-                print(f"Downloading audio for {person}...")
+                print(f"Downloading audio for {person}...", flush=True)
                 query = f"{person} speaking speech"
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
@@ -566,38 +685,38 @@ def main():
                 
                 # Try YouTube with cookies first
                 if _is_valid_cookies_file(cookies_file):
-                    print("Trying YouTube with cookies...")
+                    print("Trying YouTube with cookies...", flush=True)
                     result = subprocess.run(build_cmd("ytsearch1:", use_cookies=True), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print("Downloaded from YouTube (with cookies).")
+                        print("Downloaded from YouTube (with cookies).", flush=True)
                     else:
-                        print(f"YouTube with cookies failed:\n{result.stderr[-300:]}")
+                        print(f"YouTube with cookies failed:\n{result.stderr[-300:]}", flush=True)
 
                 # Try YouTube without cookies
                 if not downloaded:
-                    print("Trying YouTube without cookies...")
+                    print("Trying YouTube without cookies...", flush=True)
                     result = subprocess.run(build_cmd("ytsearch1:"), check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print("Downloaded from YouTube (no cookies).")
+                        print("Downloaded from YouTube (no cookies).", flush=True)
                     else:
-                        print(f"YouTube without cookies failed:\n{result.stderr[-300:]}")
+                        print(f"YouTube without cookies failed:\n{result.stderr[-300:]}", flush=True)
 
                 # Try SoundCloud as last resort
                 if not downloaded:
-                    print("Trying SoundCloud...")
+                    print("Trying SoundCloud...", flush=True)
                     sc_cmd = build_cmd("scsearch3:", _query=f"{person} speech")
                     result = subprocess.run(sc_cmd, check=False, capture_output=True, text=True)
                     if result.returncode == 0 and os.path.exists(full_wav):
                         downloaded = True
-                        print(f"Downloaded from SoundCloud.")
+                        print(f"Downloaded from SoundCloud.", flush=True)
                     else:
-                        print(f"SoundCloud failed:\n{result.stderr[-500:]}")
+                        print(f"SoundCloud failed:\n{result.stderr[-500:]}", flush=True)
 
 
                 if not downloaded:
-                    print(f"Skipping {person} — could not download audio.")
+                    print(f"Skipping {person} — could not download audio.", flush=True)
                     continue
 
                 # Get URL and save search info
@@ -612,7 +731,7 @@ def main():
                                 info_data = json.load(f)
                                 info_url = info_data.get('webpage_url', info_url)
                         except Exception as e:
-                            print(f"Could not read info json {jp}: {e}")
+                            print(f"Could not read info json {jp}: {e}", flush=True)
                         try:
                             os.remove(jp)
                         except: pass
@@ -624,25 +743,25 @@ def main():
                 # VAD
                 success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0)
                 if not success:
-                    print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.")
+                    print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.", flush=True)
                     try:
                         subprocess.run([
                             "python", upload_script,
                             folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
                         ], check=True)
-                        print(f"Uploaded review files for {person} to Google Drive.")
+                        print(f"Uploaded review files for {person} to Google Drive.", flush=True)
                     except Exception as e:
-                        print(f"Review upload failed for {person}: {e}")
+                        print(f"Review upload failed for {person}: {e}", flush=True)
                     continue
 
                 # Clone
                 try:
-                    print(f"Cloning voice for {person}...")
+                    print(f"Cloning voice for {person}...", flush=True)
                     audio = model.generate(text=sample_text, ref_audio=ref_wav)
                     sf.write(cloned_wav, audio[0], 24000)
-                    print(f"Cloned successfully: {person}")
+                    print(f"Cloned successfully: {person}", flush=True)
                 except Exception as e:
-                    print(f"Failed to clone {person}: {e}")
+                    print(f"Failed to clone {person}: {e}", flush=True)
                     continue
 
                 # Upload
@@ -652,14 +771,14 @@ def main():
                         folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6",
                         "--exclude", "full.wav"
                     ], check=True)
-                    print(f"Uploaded {person} to Google Drive.")
+                    print(f"Uploaded {person} to Google Drive.", flush=True)
                 except subprocess.CalledProcessError as e:
-                    print(f"Upload failed for {person}: {e}")
+                    print(f"Upload failed for {person}: {e}", flush=True)
 
-            print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...")
+            print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)
 
-        print(f"\nRound {round_num} complete. Starting next round immediately...")
+        print(f"\nRound {round_num} complete. Starting next round immediately...", flush=True)
 
 
 if __name__ == "__main__":

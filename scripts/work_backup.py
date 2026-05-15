@@ -25,6 +25,9 @@ transformers.logging.set_verbosity_error()
 logging.getLogger("transformers").setLevel(logging.ERROR)
 huggingface_hub.logging.set_verbosity_error()
 
+_VAD_MODEL = None
+_VAD_UTILS = None
+
 def _is_valid_cookies_file(path):
     try:
         if not os.path.exists(path) or os.path.getsize(path) < 10:
@@ -36,8 +39,13 @@ def _is_valid_cookies_file(path):
     except Exception:
         return False
 
-def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
-    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...")
+def get_vad_model():
+    """Load Silero VAD once per process instead of once per audio file."""
+    global _VAD_MODEL, _VAD_UTILS
+    if _VAD_MODEL is not None and _VAD_UTILS is not None:
+        return _VAD_MODEL, _VAD_UTILS
+
+    print("Loading Silero VAD model...")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         old_http = os.environ.get("http_proxy")
@@ -45,14 +53,19 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
         if "http_proxy" in os.environ: del os.environ["http_proxy"]
         if "https_proxy" in os.environ: del os.environ["https_proxy"]
         try:
-            model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                          model='silero_vad',
-                                          force_reload=False,
-                                          onnx=False,
-                                          trust_repo=True)
+            _VAD_MODEL, _VAD_UTILS = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                                    model='silero_vad',
+                                                    force_reload=False,
+                                                    onnx=False,
+                                                    trust_repo=True)
         finally:
             if old_http: os.environ["http_proxy"] = old_http
             if old_https: os.environ["https_proxy"] = old_https
+    return _VAD_MODEL, _VAD_UTILS
+
+def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0):
+    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...")
+    model, utils = get_vad_model()
     get_speech_timestamps = utils[0]
     
     try:
