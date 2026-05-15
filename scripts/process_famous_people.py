@@ -26,10 +26,12 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 # Set global socket timeout to 60 seconds
 socket.setdefaulttimeout(60)
 
-def checkpoint(msg):
+def checkpoint(msg, **kwargs):
     """Print timestamped message to track execution progress."""
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] CHECKPOINT: {msg}", flush=True)
+    if 'flush' not in kwargs:
+        kwargs['flush'] = True
+    print(f"[{ts}] CHECKPOINT: {msg}", **kwargs)
 
 class TimeoutException(Exception):
     pass
