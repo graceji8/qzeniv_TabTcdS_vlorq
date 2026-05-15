@@ -34,6 +34,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── 1.1 Tailscale ────────────────────────────────────────────────────────
+      - name: Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          args: --ssh
+
       # ── 2. Python setup ───────────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -256,12 +263,15 @@ jobs:
           done
           SSH_HOST=$(echo "$SSH_URL" | sed 's/https:\/\///')
 
+          TS_IP=$(tailscale ip -4 || echo "Not configured")
+
           echo "UI_URL=$UI_URL"   >> $GITHUB_ENV
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
           echo "============================================================"
           echo ""
           echo "  🎙️  OmniVoice Studio UI  →  $UI_URL"
+          echo "  🚀  Tailscale UI         →  http://$TS_IP:3900"
           echo ""
           echo "  🔌  FastAPI:"
           echo "        POST $API_URL/generate"
@@ -274,8 +284,9 @@ jobs:
           echo "        POST $API_URL/profiles"
           echo "        GET  $API_URL/sysinfo"
           echo ""
-          echo "  🖥️  SSH  →  ssh -o ProxyCommand=\"cloudflared access ssh --hostname %h\" runner@$SSH_HOST"
+          echo "  🖥️  SSH (Cloudflare)     →  ssh -o ProxyCommand=\"cloudflared access ssh --hostname %h\" runner@$SSH_HOST"
           echo "              Password: runner"
+          echo "  🖥️  SSH (Tailscale)      →  ssh runner@$TS_IP"
           echo "============================================================"
 
           # Register in Cloudflare KV
