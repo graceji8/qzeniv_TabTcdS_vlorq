@@ -63,6 +63,23 @@ huggingface_hub.logging.set_verbosity_error()
 
 _VAD_MODEL = None
 _VAD_UTILS = None
+PROCESSED_PEOPLE = set()
+MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+
+def fetch_processed_people(service):
+    """Fetch all folder names from the materials directory to skip them later."""
+    global PROCESSED_PEOPLE
+    if not service:
+        return
+    
+    checkpoint(f"Fetching processed people list from Drive (Folder: {MATERIALS_FOLDER_ID})...")
+    try:
+        import upload_results
+        contents = upload_results.get_drive_folder_contents(service, MATERIALS_FOLDER_ID)
+        PROCESSED_PEOPLE = {name.replace("_", " ").strip().lower() for name in contents.keys()}
+        checkpoint(f"Found {len(PROCESSED_PEOPLE)} already processed individuals.")
+    except Exception as e:
+        checkpoint(f"Could not fetch processed people list: {e}")
 
 def _is_valid_cookies_file(path):
     try:
@@ -175,21 +192,13 @@ def generate_famous_people_with_ai(service=None):
     import random
     print("Generating list of famous people using AI...", flush=True)
     
-    avoid_list = []
-    if service:
-        try:
-            import upload_results
-            materials_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
-            if materials_id:
-                contents = upload_results.get_drive_folder_contents(service, materials_id)
-                for name, item in contents.items():
-                    if item.get("mimeType") == "application/vnd.google-apps.folder":
-                        avoid_list.append(name.replace("_", " "))
-        except Exception as e:
-            print(f"Could not fetch existing people to avoid: {e}")
+    avoid_list = list(PROCESSED_PEOPLE)
+    if not avoid_list and service:
+        fetch_processed_people(service)
+        avoid_list = list(PROCESSED_PEOPLE)
 
     prompt = (
-        f"Generate a list of 5 of the most famous and recognizable CURRENTLY ALIVE top world leaders, "
+        f"Generate a list of 5 of the most famous and recognizable CURRENTLY ALIVE top world leaders for the year 2026, "
         f"prioritizing extremely well-known living figures like Donald Trump, Barack Obama, Emmanuel Macron, etc. "
         f"DO NOT include anyone who is deceased. "
     )
@@ -377,7 +386,21 @@ def generate_famous_people_with_ai(service=None):
     ]
     
     random.shuffle(fallback)
-    return fallback[:10]
+    raw_people = fallback[:10]
+    
+    # Filter AI generated list against processed cache
+    if people:
+        raw_people = people
+    
+    filtered_people = []
+    for item in raw_people:
+        name = item.split("|")[0].strip().lower()
+        if name in PROCESSED_PEOPLE:
+            checkpoint(f"AI suggested '{name}', but it's already processed. Skipping.")
+            continue
+        filtered_people.append(item)
+    
+    return filtered_people
 
 # 1. Get the famous people list from Google Drive or Generate it
 def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate=False):
@@ -386,6 +409,9 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
         return generate_famous_people_with_ai(None)
+
+    # Fetch processed people cache first
+    fetch_processed_people(service)
 
     # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
     people = generate_famous_people_with_ai(service)
@@ -631,18 +657,22 @@ def main():
 
                 folder_name = person.replace(" ", "_")
 
-                # Check if already processed on Google Drive
+                # Check if already processed using local cache
+                if person.lower() in PROCESSED_PEOPLE:
+                    checkpoint(f"Skipping {person} — already in PROCESSED_PEOPLE cache.", flush=True)
+                    continue
+                
+                # Extra check for cloned.wav if cache might be stale
                 service = get_drive_service()
                 if service:
                     import upload_results
-                    materials_id = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
-                    if materials_id:
-                        person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
-                        if person_folder_id:
-                            contents = upload_results.get_drive_folder_contents(service, person_folder_id)
-                            if "cloned.wav" in contents:
-                                print(f"Skipping {person} — cloned.wav already exists on Google Drive.", flush=True)
-                                continue
+                    person_folder_id = upload_results.get_drive_folder_id(service, folder_name, MATERIALS_FOLDER_ID)
+                    if person_folder_id:
+                        contents = upload_results.get_drive_folder_contents(service, person_folder_id)
+                        if "cloned.wav" in contents:
+                            checkpoint(f"Skipping {person} — cloned.wav actually exists on Drive.", flush=True)
+                            PROCESSED_PEOPLE.add(person.lower())
+                            continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
                 os.makedirs(temp_base, exist_ok=True)
                 folder_path = os.path.join(temp_base, folder_name)

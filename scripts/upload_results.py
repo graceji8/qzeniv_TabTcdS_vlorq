@@ -117,7 +117,8 @@ def get_drive_folder_id(service, folder_name, parent_id=None):
         results = service.files().list(q=query, fields="files(id)").execute()
         files = results.get('files', [])
         return files[0]['id'] if files else None
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: Error searching for folder '{folder_name}': {e}")
         return None
 
 def get_drive_folder_contents(service, folder_id):
@@ -152,8 +153,11 @@ def create_drive_folder(service, folder_name, parent_id=None):
     
     try:
         file = service.files().create(body=file_metadata, fields='id').execute()
-        return file.get('id')
-    except Exception:
+        new_id = file.get('id')
+        print(f"DEBUG: Created folder '{folder_name}' with ID: {new_id} (Parent: {parent_id})")
+        return new_id
+    except Exception as e:
+        print(f"DEBUG: Error creating folder '{folder_name}': {e}")
         return None
 
 def upload_worker(task):
@@ -222,7 +226,9 @@ def scan_and_collect(service, local_folder, parent_id=None, drive_folder_name=No
                 return []
 
     drive_folder_id = create_drive_folder(service, drive_folder_name, parent_id)
-    if not drive_folder_id: return []
+    if not drive_folder_id:
+        print(f"ERROR: Could not get/create Drive folder '{drive_folder_name}'. Cannot proceed with upload.")
+        return []
 
     tasks = []
     drive_contents = get_drive_folder_contents(service, drive_folder_id) if sync else {}
@@ -282,7 +288,9 @@ def main():
     args = parser.parse_args()
 
     local_path = os.path.abspath(args.folder)
-    if not os.path.isdir(local_path): return
+    if not os.path.isdir(local_path):
+        print(f"ERROR: Local path is not a directory: {local_path}")
+        return
 
     service = get_drive_service()
     
@@ -294,6 +302,11 @@ def main():
     all_tasks = scan_and_collect(service, local_path, parent_id, args.name, args.sync, args.exclude, args.include, args.pattern, local_path)
     
     total = len(all_tasks)
+    if total == 0:
+        print(f"DEBUG: No files found to upload in {local_path} (after filters/excludes).")
+        return
+
+    print(f"DEBUG: Starting parallel upload of {total} files...")
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         futures = {executor.submit(upload_worker, task): task for task in all_tasks}
         for i, future in enumerate(as_completed(futures)):
