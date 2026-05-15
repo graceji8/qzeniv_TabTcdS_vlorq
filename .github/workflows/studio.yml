@@ -34,12 +34,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 1.1 Tailscale ────────────────────────────────────────────────────────
-      - name: Tailscale
+      # ── 1.1 Tailscale & Home Proxy ───────────────────────────────────────────
+      - name: Upgrade Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale version: $(tailscale version)"
+
+      - name: Connect Tailscale
         uses: tailscale/github-action@v2
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          args: --ssh
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-routes --ssh
+
+      - name: Setup Home Proxy via SSH
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh -o StrictHostKeyChecking=no -f -N -D 1080 -p 168 admin@100.65.165.65
+            echo "SSH SOCKS proxy started on port 1080"
+            echo "YTDLP_PROXY=socks5://127.0.0.1:1080" >> $GITHUB_ENV
+          else
+            echo "WARNING: No SSH_PRIVATE_KEY secret found. Skipping home proxy setup."
+          fi
 
       # ── 2. Python setup ───────────────────────────────────────────────────────
       - name: Set up Python 3.11
@@ -195,6 +215,7 @@ jobs:
           docker run -d \
             --name omnivoice \
             $GPU_FLAGS \
+            --add-host=host.docker.internal:host-gateway \
             -p 3900:3900 \
             -p 8000:8000 \
             -v omnivoice-data:/app/omnivoice_data \
@@ -202,6 +223,7 @@ jobs:
             -e HF_TOKEN="${{ secrets.HF_TOKEN }}" \
             -e PYTHONPATH=/app/backend \
             -e OMNIVOICE_TTS_BACKEND=omnivoice \
+            -e YTDLP_PROXY="socks5://host.docker.internal:1080" \
             ghcr.io/debpalash/omnivoice-studio:latest
 
           echo "Container started — waiting for services..."
@@ -303,7 +325,7 @@ jobs:
 
       # ── 14. Run process_famous_people.py ──────────────────────────────────────
       - name: Run process_famous_people.py
-        if: ${{ github.event.inputs.skip_pipeline != 'true' }}
+        if: ${{ github.event.inputs.skip_pipeline != 'true' && github.event.inputs.debug_mode != 'true' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -331,12 +353,20 @@ jobs:
 
       # ── 15. Keep Server Alive ───────────────────────────────────────────────
       - name: Keep Server Alive
+        if: ${{ github.event.inputs.debug_mode == 'true' || github.event.inputs.skip_pipeline == 'true' || success() }}
         run: |
           echo "============================================================"
           echo "  Server is now waiting indefinitely."
           echo "  You can access the OmniVoice UI and SSH into the runner."
           echo "  Sleeping for up to 6 hours..."
           echo "============================================================"
+          sleep 21600
+
+      # ── 15b. Keep alive for debugging on failure ─────────────────────────────
+      - name: Keep alive for debugging on failure
+        if: failure() && github.event.inputs.debug_mode == 'true'
+        run: |
+          echo "Workflow failed in debug mode. Keeping runner alive for 6 hours..."
           sleep 21600
 
       # ── 15. Show container logs on failure ───────────────────────────────────
