@@ -172,8 +172,30 @@ def get_vad_model():
             socket.setdefaulttimeout(old_timeout)
     return _VAD_MODEL, _VAD_UTILS
 
-def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_model=None, person_name=None):
-    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path}...", flush=True)
+def detect_gender_from_pitch(wav_tensor, sample_rate):
+    """Detect gender based on mean pitch (F0)."""
+    import torchaudio.functional as F
+    try:
+        # Detect pitch contour
+        # Use a reasonable range for human voice (50Hz - 500Hz)
+        pitch = F.detect_pitch_frequency(wav_tensor, sample_rate)
+        voiced_pitch = pitch[pitch > 0]
+        if voiced_pitch.numel() == 0:
+            return "unknown"
+        
+        mean_pitch = voiced_pitch.mean().item()
+        # Typical thresholds: Male: 85-155Hz, Female: 165-255Hz
+        # We'll use 160Hz as a threshold
+        if mean_pitch > 160:
+            return "female", mean_pitch
+        else:
+            return "male", mean_pitch
+    except Exception as e:
+        print(f"Pitch detection error: {e}")
+        return "unknown", 0
+
+def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_model=None, person_name=None, target_gender=None):
+    print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path} (Target Gender: {target_gender})...", flush=True)
     model, utils = get_vad_model()
     if model is None or utils is None:
         print("ERROR: VAD model could not be loaded. Skipping clear speech extraction.", flush=True)
@@ -220,8 +242,20 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
     
     import tempfile
     
-    # Sort candidates by length descending
-    candidates = sorted(speech_timestamps, key=lambda x: x['end'] - x['start'], reverse=True)
+    # Skip segments in the first 30 seconds — these are usually host/narrator intros
+    intro_cutoff_16k = 30 * 16000
+    non_intro_timestamps = [ts for ts in speech_timestamps if ts['start'] >= intro_cutoff_16k]
+    
+    if non_intro_timestamps:
+        print(f"Skipping first 30s intro zone. {len(speech_timestamps)} total segments -> {len(non_intro_timestamps)} after intro cutoff.", flush=True)
+        candidates_pool = non_intro_timestamps
+    else:
+        print("All speech is within the first 30s. Using all segments.", flush=True)
+        candidates_pool = speech_timestamps
+    
+    # Sort candidates by start time (later segments = more likely the actual person speaking)
+    # Among segments starting at similar times, prefer longer ones
+    candidates = sorted(candidates_pool, key=lambda x: (x['start'], x['end'] - x['start']), reverse=False)
     
     valid_candidates = []
     
@@ -253,9 +287,24 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
             
             try:
                 text = asr_model.transcribe(tmp_path).lower()
-                print(f"Candidate transcription ({start_sample/samplerate:.1f}s): {text}", flush=True)
+                segment_time = start_sample / samplerate
+                print(f"Candidate transcription ({segment_time:.1f}s): {text}", flush=True)
                 
-                bad_tags = ["[applause]", "(applause)", "[music]", "(music)", "[laughter]", "(laughter)"]
+                bad_tags = ["[applause]", "(applause)", "[music]", "(music)", "[laughter]", "(laughter)",
+                            "[cheering]", "(cheering)", "[crowd]", "(crowd)"]
+                intro_phrases = [
+                    "please welcome", "here is", "introducing", "ladies and gentlemen",
+                    "today we have", "our guest", "joining us", "let me introduce",
+                    "welcome to", "i'm joined by", "next up", "we're joined by",
+                    "put your hands together", "give it up for", "round of applause",
+                    "my next guest", "our next guest", "special guest",
+                    "here to talk", "here to discuss", "here with us",
+                    "welcome back", "thanks for joining", "thank you for joining",
+                    "it's my pleasure", "it is my pleasure", "i'd like to welcome",
+                    "let's welcome", "now i'd like", "now i would like",
+                    "with me today", "with us today", "on the show today",
+                    "coming up next", "stay tuned", "subscribe",
+                ]
                 if any(tag in text for tag in bad_tags):
                     print("Found applause/music/laughter tag. Skipping.", flush=True)
                     is_clean = False
@@ -265,18 +314,33 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
                 elif person_name and person_name.lower() in text:
                     print(f"Found person's name '{person_name}' in text, likely an intro. Skipping.", flush=True)
                     is_clean = False
-                elif "please welcome" in text or "here is" in text or "introducing" in text:
-                    print("Found intro phrase. Skipping.", flush=True)
+                elif any(phrase in text for phrase in intro_phrases):
+                    print(f"Found intro/host phrase in text. Skipping.", flush=True)
                     is_clean = False
-                else:
+
+                if is_clean:
                     if langdetect:
                         try:
                             lang = langdetect.detect(text)
                             print(f"Detected language: {lang}", flush=True)
                         except:
                             pass
+                
+                # Check gender if target_gender is provided
+                if is_clean and target_gender:
+                    # Convert to tensor for gender detection
+                    extracted_tensor = torch.tensor(extracted_data, dtype=torch.float32)
+                    if extracted_tensor.ndim > 1:
+                        extracted_tensor = extracted_tensor.mean(dim=0)
+                    
+                    detected_gender, pitch_hz = detect_gender_from_pitch(extracted_tensor.unsqueeze(0), samplerate)
+                    print(f"Detected gender: {detected_gender} ({pitch_hz:.1f} Hz)", flush=True)
+                    
+                    if detected_gender != "unknown" and detected_gender.lower() != target_gender.lower():
+                        print(f"Gender mismatch: expected {target_gender}, detected {detected_gender}. Skipping (likely host).", flush=True)
+                        is_clean = False
             except Exception as e:
-                print(f"Transcribe error: {e}", flush=True)
+                print(f"Transcribe or gender check error: {e}", flush=True)
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -287,9 +351,10 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
                 best_segment = {'start': ts['start'], 'end': ts['end']}
                 if best_segment['end'] - best_segment['start'] > target_samples_16k:
                     best_segment['end'] = best_segment['start'] + target_samples_16k
+                print(f"Found non-English speech at {ts['start']/16000:.1f}s — using this (likely the actual person).", flush=True)
                 break
             else:
-                # Save the clean English segment as a fallback
+                # Save the clean English segment as a candidate
                 valid_candidates.append(ts)
                 if len(valid_candidates) >= 3:
                     # Checked 3 clean English segments, probably an English speaker. Stop searching.
@@ -297,15 +362,19 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
             
     if not best_segment:
         if valid_candidates:
-            # Fallback to the best clean English segment we found
-            print("No clean non-English segment found, using the best clean English segment.", flush=True)
-            best_segment = {'start': valid_candidates[0]['start'], 'end': valid_candidates[0]['end']}
+            # Pick the LATEST clean segment (furthest from intro) that is long enough
+            # Sort by start time descending — later segments are more likely the actual person
+            later_candidates = sorted(valid_candidates, key=lambda x: x['start'], reverse=True)
+            chosen = later_candidates[0]
+            print(f"Using latest clean English segment at {chosen['start']/16000:.1f}s (avoiding early intro zone).", flush=True)
+            best_segment = {'start': chosen['start'], 'end': chosen['end']}
             if best_segment['end'] - best_segment['start'] > target_samples_16k:
                 best_segment['end'] = best_segment['start'] + target_samples_16k
         else:
-            # Fallback to the longest if none were "clean"
-            print("No fully clean segment found, falling back to longest.", flush=True)
-            best_segment = candidates[0]
+            # Fallback to the latest segment (furthest from intro)
+            latest = sorted(candidates, key=lambda x: x['start'], reverse=True)
+            print(f"No fully clean segment found, falling back to latest segment at {latest[0]['start']/16000:.1f}s.", flush=True)
+            best_segment = latest[0]
             if best_segment['end'] - best_segment['start'] > target_samples_16k:
                 best_segment['end'] = best_segment['start'] + target_samples_16k
 
@@ -340,7 +409,7 @@ def generate_famous_people_with_ai(service=None):
         prompt += f"EXTREMELY IMPORTANT: DO NOT include any of the following people as they have already been processed: {avoid_str}. "
         
     prompt += (
-        f"Provide a famous quote for each person. Format each line exactly as 'Name|Quote'. "
+        f"Provide a famous quote and the gender ('male' or 'female') for each person. Format each line exactly as 'Name|Quote|Gender'. "
         f"Do not include numbering, bullet points, or any other text."
     )
     
@@ -463,56 +532,56 @@ def generate_famous_people_with_ai(service=None):
     time.sleep(5)
     
     fallback = [
-        "Joe Biden|The future belongs to those who believe in the beauty of their dreams.",
-        "Rishi Sunak|Integrity and professionalism are my top priorities.",
-        "Justin Trudeau|Diversity is our strength.",
-        "Narendra Modi|Individual effort can make a big difference.",
-        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here.",
-        "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.",
-        "Bill Gates|Success is a lousy teacher. It seduces smart people into thinking they can't lose.",
-        "Jeff Bezos|Your brand is what other people say about you when you're not in the room.",
-        "Mark Zuckerberg|The biggest risk is not taking any risk.",
-        "Tim Cook|Life is fragile. We’re not guaranteed a tomorrow so give it everything you've got.",
-        "Pope Francis|A little bit of mercy makes the world less cold and more just.",
-        "Dalai Lama|Happiness is not something ready made. It comes from your own actions.",
-        "Malala Yousafzai|One child, one teacher, one book, one pen can change the world.",
-        "Greta Thunberg|I want you to act as if our house is on fire. Because it is.",
-        "Lionel Messi|You have to fight to reach your dream. You have to sacrifice and work hard for it.",
-        "Cristiano Ronaldo|Your love makes me strong, your hate makes me unstoppable.",
-        "LeBron James|You can't be afraid to fail. It's the only way you succeed.",
-        "Stephen Curry|Success is not a destination, it's a journey.",
-        "Lewis Hamilton|I feel like people are expecting me to fail, therefore I expect myself to win.",
-        "Serena Williams|I really think a champion is defined not by their wins but by how they can recover when they fall.",
-        "Taylor Swift|No matter what happens in life, be good to people. Being good to people is a wonderful legacy to leave behind.",
-        "Beyonce|I don't like to gamble, but if there's one thing I'm willing to bet on, it's myself.",
-        "Rihanna|It's important to keep your head held high and your heart even higher.",
-        "Adele|I don't make music for eyes. I make music for ears.",
-        "Ed Sheeran|Be a true heart, not a follower.",
-        "Drake|Tables turn, bridges burn, you live and learn.",
-        "Kanye West|I am my own biggest fan.",
-        "Lady Gaga|Don't you ever let a soul in the world tell you that you can't be exactly who you are.",
-        "Bruno Mars|I just want to make music and have a good time.",
-        "Justin Bieber|I want my world to be fun.",
-        "Tom Hanks|I've made a lot of movies and some of them were even good.",
-        "Meryl Streep|The great gift of human beings is that we have the power of empathy.",
-        "Leonardo DiCaprio|If you can do what you do best and be happy, you're further along in life than most people.",
-        "Brad Pitt|I'm one of those people you hate because of genetics. It's the truth.",
-        "Angelina Jolie|Every day we choose who we are by how we define ourselves.",
-        "Robert Downey Jr.|I know who I am. I'm the dude playin' the dude, disguised as another dude!",
-        "Scarlett Johansson|I'm not going to apologize for being successful.",
-        "Will Smith|If you're not making someone else's life better, then you're wasting your time.",
-        "Dwayne Johnson|Success at anything will always come down to this: focus and effort.",
-        "Oprah Winfrey|The biggest adventure you can take is to live the life of your dreams.",
-        "Ellen DeGeneres|Be kind to one another.",
-        "David Attenborough|It seems to me that the natural world is the greatest source of excitement.",
-        "Michelle Obama|Success isn't about how much money you make; it's about the difference you make in people's lives.",
-        "Hillary Clinton|Women are the largest untapped reservoir of talent in the world.",
-        "Angela Merkel|Fear was never a good adviser, neither in our personal lives nor in our society.",
-        "Emmanuel Macron|Make our planet great again.",
-        "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.",
-        "Keir Starmer|Country first, party second.",
-        "Olaf Scholz|We are living through a watershed era.",
-        "Xi Jinping|The people's aspirations for a better life are what we must fight for."
+        "Joe Biden|The future belongs to those who believe in the beauty of their dreams.|male",
+        "Rishi Sunak|Integrity and professionalism are my top priorities.|male",
+        "Justin Trudeau|Diversity is our strength.|male",
+        "Narendra Modi|Individual effort can make a big difference.|male",
+        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here.|male",
+        "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.|male",
+        "Bill Gates|Success is a lousy teacher. It seduces smart people into thinking they can't lose.|male",
+        "Jeff Bezos|Your brand is what other people say about you when you're not in the room.|male",
+        "Mark Zuckerberg|The biggest risk is not taking any risk.|male",
+        "Tim Cook|Life is fragile. We’re not guaranteed a tomorrow so give it everything you've got.|male",
+        "Pope Francis|A little bit of mercy makes the world less cold and more just.|male",
+        "Dalai Lama|Happiness is not something ready made. It comes from your own actions.|male",
+        "Malala Yousafzai|One child, one teacher, one book, one pen can change the world.|female",
+        "Greta Thunberg|I want you to act as if our house is on fire. Because it is.|female",
+        "Lionel Messi|You have to fight to reach your dream. You have to sacrifice and work hard for it.|male",
+        "Cristiano Ronaldo|Your love makes me strong, your hate makes me unstoppable.|male",
+        "LeBron James|You can't be afraid to fail. It's the only way you succeed.|male",
+        "Stephen Curry|Success is not a destination, it's a journey.|male",
+        "Lewis Hamilton|I feel like people are expecting me to fail, therefore I expect myself to win.|male",
+        "Serena Williams|I really think a champion is defined not by their wins but by how they can recover when they fall.|female",
+        "Taylor Swift|No matter what happens in life, be good to people. Being good to people is a wonderful legacy to leave behind.|female",
+        "Beyonce|I don't like to gamble, but if there's one thing I'm willing to bet on, it's myself.|female",
+        "Rihanna|It's important to keep your head held high and your heart even higher.|female",
+        "Adele|I don't make music for eyes. I make music for ears.|female",
+        "Ed Sheeran|Be a true heart, not a follower.|male",
+        "Drake|Tables turn, bridges burn, you live and learn.|male",
+        "Kanye West|I am my own biggest fan.|male",
+        "Lady Gaga|Don't you ever let a soul in the world tell you that you can't be exactly who you are.|female",
+        "Bruno Mars|I just want to make music and have a good time.|male",
+        "Justin Bieber|I want my world to be fun.|male",
+        "Tom Hanks|I've made a lot of movies and some of them were even good.|male",
+        "Meryl Streep|The great gift of human beings is that we have the power of empathy.|female",
+        "Leonardo DiCaprio|If you can do what you do best and be happy, you're further along in life than most people.|male",
+        "Brad Pitt|I'm one of those people you hate because of genetics. It's the truth.|male",
+        "Angelina Jolie|Every day we choose who we are by how we define ourselves.|female",
+        "Robert Downey Jr.|I know who I am. I'm the dude playin' the dude, disguised as another dude!|male",
+        "Scarlett Johansson|I'm not going to apologize for being successful.|female",
+        "Will Smith|If you're not making someone else's life better, then you're wasting your time.|male",
+        "Dwayne Johnson|Success at anything will always come down to this: focus and effort.|male",
+        "Oprah Winfrey|The biggest adventure you can take is to live the life of your dreams.|female",
+        "Ellen DeGeneres|Be kind to one another.|female",
+        "David Attenborough|It seems to me that the natural world is the greatest source of excitement.|male",
+        "Michelle Obama|Success isn't about how much money you make; it's about the difference you make in people's lives.|female",
+        "Hillary Clinton|Women are the largest untapped reservoir of talent in the world.|female",
+        "Angela Merkel|Fear was never a good adviser, neither in our personal lives nor in our society.|female",
+        "Emmanuel Macron|Make our planet great again.|male",
+        "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.|male",
+        "Keir Starmer|Country first, party second.|male",
+        "Olaf Scholz|We are living through a watershed era.|male",
+        "Xi Jinping|The people's aspirations for a better life are what we must fight for.|male"
     ]
     
     random.shuffle(fallback)
@@ -778,14 +847,16 @@ def main():
 
             for item in batch:
                 if "|" in item:
-                    person, sample_text = item.split("|", 1)
-                    person = person.strip()
-                    sample_text = sample_text.strip()
+                    parts = item.split("|")
+                    person = parts[0].strip()
+                    sample_text = parts[1].strip()
+                    target_gender = parts[2].strip() if len(parts) > 2 else None
                 else:
                     person = item.strip()
                     sample_text = "You're so lucky. You are so lucky to be an opera singer. I mean this."
+                    target_gender = None
 
-                print(f"\nProcessing: {person}", flush=True)
+                print(f"\nProcessing: {person} (Expected Gender: {target_gender})", flush=True)
 
                 folder_name = person.replace(" ", "_")
 
@@ -919,7 +990,7 @@ def main():
                         f.write(f"Attempt: {attempt}\n")
 
                     # VAD
-                    success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person)
+                    success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person, target_gender=target_gender)
                     if success:
                         break # Found clear speech!
                     else:
