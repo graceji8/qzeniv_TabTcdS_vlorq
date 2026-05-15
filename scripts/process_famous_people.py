@@ -466,22 +466,24 @@ def generate_famous_people_with_ai(service=None):
         avoid_list = list(PROCESSED_PEOPLE)
 
     prompt = (
-        f"Generate a list of 5 of the most famous and recognizable CURRENTLY ALIVE top world leaders for the year 2026. "
+        f"Generate a list of 20 of the most famous and recognizable CURRENTLY ALIVE top world leaders for the year 2026. "
         f"Include potential or incoming leaders like Mark Carney from Canada, alongside extremely well-known figures like Donald Trump, Emmanuel Macron, etc. "
         f"DO NOT include anyone who is deceased. "
     )
     
     if avoid_list:
-        # Pass up to 50 random names from the avoid list to keep the prompt size reasonable
-        avoid_sample = random.sample(avoid_list, min(len(avoid_list), 50))
-        avoid_str = ", ".join(avoid_sample)
+        # Pass all names from the avoid list to ensure no repeats
+        avoid_str = ", ".join(avoid_list)
         prompt += f"EXTREMELY IMPORTANT: DO NOT include any of the following people as they have already been processed: {avoid_str}. "
         
     prompt += (
-        f"Provide a famous quote and the gender ('male' or 'female') for each person. Format each line exactly as 'Name|Quote|Gender'. "
+        f"Provide a famous quote, the gender ('male' or 'female'), and the country they represent for each person. "
+        f"Format each line exactly as 'Name|Quote|Gender|Country'. "
         f"Do not include numbering, bullet points, or any other text."
     )
     
+    people = []
+
     # Try GitHub Models if GH_MODELS_TOKEN or GITHUB_TOKEN exists
     github_token = os.environ.get("GH_MODELS_TOKEN") or os.environ.get("GIT_MODEL_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if github_token:
@@ -501,7 +503,7 @@ def generate_famous_people_with_ai(service=None):
                 print("DEBUG: GitHub Models API success!")
                 data = response.json()
                 content = data['choices'][0]['message']['content']
-                return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
             else:
                 print(f"GitHub Models API error: {response.status_code} - {response.text}")
         except Exception as e:
@@ -511,7 +513,7 @@ def generate_famous_people_with_ai(service=None):
 
     # Try Cloudflare Workers AI if CLOUDFLARE_ACCOUNTS_JSON exists
     cf_accounts_env = os.environ.get("CLOUDFLARE_ACCOUNTS_JSON")
-    if cf_accounts_env:
+    if not people and cf_accounts_env:
         print("DEBUG: CLOUDFLARE_ACCOUNTS_JSON detected.", flush=True)
         try:
             import json
@@ -536,19 +538,19 @@ def generate_famous_people_with_ai(service=None):
                     if data.get("success"):
                         print("DEBUG: Cloudflare AI success!")
                         content = data["result"]["response"]
-                        return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                        people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
                     else:
                         print(f"Cloudflare AI failed: {data.get('errors')}")
                 else:
                     print(f"Cloudflare API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Cloudflare AI exception: {e}")
-    else:
+    elif not people:
         print("DEBUG: No CLOUDFLARE_ACCOUNTS_JSON found.")
 
     # Try OpenAI if OPENAI_API_KEY exists
     api_key = os.environ.get("OPENAI_API_KEY")
-    if api_key:
+    if not people and api_key:
         print(f"DEBUG: OPENAI_API_KEY detected (length: {len(api_key)})", flush=True)
         try:
             response = requests.post(
@@ -565,92 +567,93 @@ def generate_famous_people_with_ai(service=None):
                 print("DEBUG: OpenAI API success!")
                 data = response.json()
                 content = data['choices'][0]['message']['content']
-                return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+                people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
             else:
                 print(f"OpenAI API error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"OpenAI generation failed: {e}")
-    else:
+    elif not people:
         print("DEBUG: No OPENAI_API_KEY found.")
             
     # Try local Ollama
-    try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3",
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=5
-        )
-        if response.status_code == 200:
-            content = response.json().get("response", "")
-            return [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
-    except Exception as e:
-        # Don't print Ollama connection errors in CI or if it's clearly not there
-        is_conn_error = any(msg in str(e).lower() for msg in ["connection refused", "failed to establish a new connection"])
-        if 'GITHUB_ACTIONS' not in os.environ and not is_conn_error:
-            print(f"Ollama generation failed: {e}")
-        elif is_conn_error:
-            # Quietly note that local AI is unavailable
-            pass
+    if not people:
+        try:
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "llama3",
+                    "prompt": prompt,
+                    "stream": False
+                },
+                timeout=5
+            )
+            if response.status_code == 200:
+                content = response.json().get("response", "")
+                people = [line.strip('-1234567890. ') for line in content.split('\n') if line.strip()]
+        except Exception as e:
+            # Don't print Ollama connection errors in CI or if it's clearly not there
+            is_conn_error = any(msg in str(e).lower() for msg in ["connection refused", "failed to establish a new connection"])
+            if 'GITHUB_ACTIONS' not in os.environ and not is_conn_error:
+                print(f"Ollama generation failed: {e}")
+            elif is_conn_error:
+                # Quietly note that local AI is unavailable
+                pass
         
-    print("AI generation failed for this round. Using fallback list.", flush=True)
-    # Add a small delay if AI fails to prevent rapid looping
-    time.sleep(5)
-    
-    fallback = [
-        "Joe Biden|The future belongs to those who believe in the beauty of their dreams.|male",
-        "Rishi Sunak|Integrity and professionalism are my top priorities.|male",
-        "Justin Trudeau|Diversity is our strength.|male",
-        "Narendra Modi|Individual effort can make a big difference.|male",
-        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here.|male",
-        "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.|male",
-        "Bill Gates|Success is a lousy teacher. It seduces smart people into thinking they can't lose.|male",
-        "Jeff Bezos|Your brand is what other people say about you when you're not in the room.|male",
-        "Mark Zuckerberg|The biggest risk is not taking any risk.|male",
-        "Tim Cook|Life is fragile. We’re not guaranteed a tomorrow so give it everything you've got.|male",
-        "Pope Francis|A little bit of mercy makes the world less cold and more just.|male",
-        "Dalai Lama|Happiness is not something ready made. It comes from your own actions.|male",
-        "Malala Yousafzai|One child, one teacher, one book, one pen can change the world.|female",
-        "Greta Thunberg|I want you to act as if our house is on fire. Because it is.|female",
-        "Lionel Messi|You have to fight to reach your dream. You have to sacrifice and work hard for it.|male",
-        "Cristiano Ronaldo|Your love makes me strong, your hate makes me unstoppable.|male",
-        "LeBron James|You can't be afraid to fail. It's the only way you succeed.|male",
-        "Stephen Curry|Success is not a destination, it's a journey.|male",
-        "Lewis Hamilton|I feel like people are expecting me to fail, therefore I expect myself to win.|male",
-        "Serena Williams|I really think a champion is defined not by their wins but by how they can recover when they fall.|female",
-        "Taylor Swift|No matter what happens in life, be good to people. Being good to people is a wonderful legacy to leave behind.|female",
-        "Beyonce|I don't like to gamble, but if there's one thing I'm willing to bet on, it's myself.|female",
-        "Rihanna|It's important to keep your head held high and your heart even higher.|female",
-        "Adele|I don't make music for eyes. I make music for ears.|female",
-        "Ed Sheeran|Be a true heart, not a follower.|male",
-        "Drake|Tables turn, bridges burn, you live and learn.|male",
-        "Kanye West|I am my own biggest fan.|male",
-        "Lady Gaga|Don't you ever let a soul in the world tell you that you can't be exactly who you are.|female",
-        "Bruno Mars|I just want to make music and have a good time.|male",
-        "Justin Bieber|I want my world to be fun.|male",
-        "Tom Hanks|I've made a lot of movies and some of them were even good.|male",
-        "Meryl Streep|The great gift of human beings is that we have the power of empathy.|female",
-        "Leonardo DiCaprio|If you can do what you do best and be happy, you're further along in life than most people.|male",
-        "Brad Pitt|I'm one of those people you hate because of genetics. It's the truth.|male",
-        "Angelina Jolie|Every day we choose who we are by how we define ourselves.|female",
-        "Robert Downey Jr.|I know who I am. I'm the dude playin' the dude, disguised as another dude!|male",
-        "Scarlett Johansson|I'm not going to apologize for being successful.|female",
-        "Will Smith|If you're not making someone else's life better, then you're wasting your time.|male",
-        "Dwayne Johnson|Success at anything will always come down to this: focus and effort.|male",
-        "Oprah Winfrey|The biggest adventure you can take is to live the life of your dreams.|female",
-        "Ellen DeGeneres|Be kind to one another.|female",
-        "David Attenborough|It seems to me that the natural world is the greatest source of excitement.|male",
-        "Michelle Obama|Success isn't about how much money you make; it's about the difference you make in people's lives.|female",
-        "Hillary Clinton|Women are the largest untapped reservoir of talent in the world.|female",
-        "Angela Merkel|Fear was never a good adviser, neither in our personal lives nor in our society.|female",
-        "Emmanuel Macron|Make our planet great again.|male",
-        "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.|male",
-        "Keir Starmer|Country first, party second.|male",
-        "Olaf Scholz|We are living through a watershed era.|male",
-        "Xi Jinping|The people's aspirations for a better life are what we must fight for.|male"
+    if not people:
+        print("AI generation failed for this round. Using fallback list.", flush=True)
+        # Add a small delay if AI fails to prevent rapid looping
+        time.sleep(5)    fallback = [
+        "Joe Biden|The future belongs to those who believe in the beauty of their dreams.|male|United States",
+        "Rishi Sunak|Integrity and professionalism are my top priorities.|male|United Kingdom",
+        "Justin Trudeau|Diversity is our strength.|male|Canada",
+        "Narendra Modi|Individual effort can make a big difference.|male|India",
+        "Volodymyr Zelenskyy|We are all here, our soldiers are here, citizens are here.|male|Ukraine",
+        "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.|male|United States",
+        "Bill Gates|Success is a lousy teacher. It seduces smart people into thinking they can't lose.|male|United States",
+        "Jeff Bezos|Your brand is what other people say about you when you're not in the room.|male|United States",
+        "Mark Zuckerberg|The biggest risk is not taking any risk.|male|United States",
+        "Tim Cook|Life is fragile. We're not guaranteed a tomorrow so give it everything you've got.|male|United States",
+        "Pope Francis|A little bit of mercy makes the world less cold and more just.|male|Vatican City",
+        "Dalai Lama|Happiness is not something ready made. It comes from your own actions.|male|Tibet",
+        "Malala Yousafzai|One child, one teacher, one book, one pen can change the world.|female|Pakistan",
+        "Greta Thunberg|I want you to act as if our house is on fire. Because it is.|female|Sweden",
+        "Lionel Messi|You have to fight to reach your dream. You have to sacrifice and work hard for it.|male|Argentina",
+        "Cristiano Ronaldo|Your love makes me strong, your hate makes me unstoppable.|male|Portugal",
+        "LeBron James|You can't be afraid to fail. It's the only way you succeed.|male|United States",
+        "Stephen Curry|Success is not a destination, it's a journey.|male|United States",
+        "Lewis Hamilton|I feel like people are expecting me to fail, therefore I expect myself to win.|male|United Kingdom",
+        "Serena Williams|I really think a champion is defined not by their wins but by how they can recover when they fall.|female|United States",
+        "Taylor Swift|No matter what happens in life, be good to people. Being good to people is a wonderful legacy to leave behind.|female|United States",
+        "Beyonce|I don't like to gamble, but if there's one thing I'm willing to bet on, it's myself.|female|United States",
+        "Rihanna|It's important to keep your head held high and your heart even higher.|female|Barbados",
+        "Adele|I don't make music for eyes. I make music for ears.|female|United Kingdom",
+        "Ed Sheeran|Be a true heart, not a follower.|male|United Kingdom",
+        "Drake|Tables turn, bridges burn, you live and learn.|male|Canada",
+        "Kanye West|I am my own biggest fan.|male|United States",
+        "Lady Gaga|Don't you ever let a soul in the world tell you that you can't be exactly who you are.|female|United States",
+        "Bruno Mars|I just want to make music and have a good time.|male|United States",
+        "Justin Bieber|I want my world to be fun.|male|Canada",
+        "Tom Hanks|I've made a lot of movies and some of them were even good.|male|United States",
+        "Meryl Streep|The great gift of human beings is that we have the power of empathy.|female|United States",
+        "Leonardo DiCaprio|If you can do what you do best and be happy, you're further along in life than most people.|male|United States",
+        "Brad Pitt|I'm one of those people you hate because of genetics. It's the truth.|male|United States",
+        "Angelina Jolie|Every day we choose who we are by how we define ourselves.|female|United States",
+        "Robert Downey Jr.|I know who I am. I'm the dude playin' the dude, disguised as another dude!|male|United States",
+        "Scarlett Johansson|I'm not going to apologize for being successful.|female|United States",
+        "Will Smith|If you're not making someone else's life better, then you're wasting your time.|male|United States",
+        "Dwayne Johnson|Success at anything will always come down to this: focus and effort.|male|United States",
+        "Oprah Winfrey|The biggest adventure you can take is to live the life of your dreams.|female|United States",
+        "Ellen DeGeneres|Be kind to one another.|female|United States",
+        "David Attenborough|It seems to me that the natural world is the greatest source of excitement.|male|United Kingdom",
+        "Michelle Obama|Success isn't about how much money you make; it's about the difference you make in people's lives.|female|United States",
+        "Hillary Clinton|Women are the largest untapped reservoir of talent in the world.|female|United States",
+        "Angela Merkel|Fear was never a good adviser, neither in our personal lives nor in our society.|female|Germany",
+        "Emmanuel Macron|Make our planet great again.|male|France",
+        "Boris Johnson|My friends, as I have discovered myself, there are no disasters, only opportunities.|male|United Kingdom",
+        "Keir Starmer|Country first, party second.|male|United Kingdom",
+        "Olaf Scholz|We are living through a watershed era.|male|Germany",
+        "Xi Jinping|The people's aspirations for a better life are what we must fight for.|male|China"
+    ]e"
     ]
     
     random.shuffle(fallback)
@@ -924,12 +927,14 @@ def main():
                     person = parts[0].strip()
                     sample_text = parts[1].strip()
                     target_gender = parts[2].strip() if len(parts) > 2 else None
+                    location = parts[3].strip() if len(parts) > 3 else None
                 else:
                     person = item.strip()
                     sample_text = "You're so lucky. You are so lucky to be an opera singer. I mean this."
                     target_gender = None
+                    location = None
 
-                print(f"\nProcessing: {person} (Expected Gender: {target_gender})", flush=True)
+                print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location})", flush=True)
 
                 folder_name = person.replace(" ", "_")
 
@@ -979,7 +984,8 @@ def main():
 
                     # Download
                     print(f"Downloading audio for {person} (Search index: {attempt})...", flush=True)
-                    query = f"{person} speaking speech original voice -interpreter -dubbed -translated -translator"
+                    location_hint = f" {location}" if location else ""
+                    query = f"{person}{location_hint} speaking speech original voice -interpreter -dubbed -translated -translator"
                     cookies_file = os.path.join(script_dir, "cookies.txt")
 
                     def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=attempt):
@@ -1061,6 +1067,8 @@ def main():
                         f.write(f"Keywords: {query}\n")
                         f.write(f"URL: {info_url}\n")
                         f.write(f"Attempt: {attempt}\n")
+                        if location:
+                            f.write(f"Location: {location}\n")
 
                     # VAD
                     success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person, target_gender=target_gender)
@@ -1111,7 +1119,7 @@ def main():
                                 "name": person,
                                 "character": person,
                                 "category": "Celebs",
-                                "description": f"Generated from YouTube. Search: {query}"
+                                "description": f"Generated from YouTube. Location: {location or 'Unknown'}. Search: {query}"
                             },
                             files={"audio": ("ref.wav", f, "audio/wav")},
                             timeout=30
