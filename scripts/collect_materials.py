@@ -84,6 +84,52 @@ def get_wikipedia_summary(person_name, output_path):
         checkpoint(f"Error fetching Wikipedia: {e}")
     return False
 
+def get_location_info(person_name, output_path):
+    """Extract birthplace/location from Wikipedia page content."""
+    if not wikipedia:
+        checkpoint("Skipping location fetch (library missing).")
+        return False
+
+    checkpoint(f"Fetching location info for {person_name}...")
+    try:
+        page = wikipedia.page(person_name, auto_suggest=False)
+        content = page.content
+        import re
+
+        # Try to find "born in <Location>" or "born ... <City>, <Country>"
+        born_patterns = [
+            r'born[^.]*?in\s+([A-Z][\w\s,]+(?:,\s*[A-Z][\w\s]+)*)',
+            r'born\s+(?:on\s+)?[A-Za-z]+\s+\d{1,2},?\s+\d{4},?\s+in\s+([A-Z][\w\s,]+)',
+            r'born\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}[^.]*?in\s+([A-Z][\w\s,]+)',
+        ]
+
+        birthplace = None
+        for pat in born_patterns:
+            m = re.search(pat, content)
+            if m:
+                birthplace = m.group(1).strip().rstrip('.')
+                # Trim to something reasonable
+                if len(birthplace) > 80:
+                    birthplace = birthplace[:80]
+                break
+
+        # Also grab the first sentence which often has location context
+        first_sentence = content.split('.')[0] if content else ''
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"Person: {person_name}\n")
+            if birthplace:
+                f.write(f"Birthplace: {birthplace}\n")
+            else:
+                f.write(f"Birthplace: (not found automatically)\n")
+            f.write(f"\nFirst sentence: {first_sentence}\n")
+
+        checkpoint(f"Location saved: {birthplace or 'not found'}")
+        return True
+    except Exception as e:
+        checkpoint(f"Error fetching location: {e}")
+    return False
+
 def search_and_download_images(person_name, folder_path):
     checkpoint(f"Searching for images of {person_name}...")
     try:
@@ -193,8 +239,10 @@ def main():
 
         wiki_path = os.path.join(folder_path, "wikipedia.txt")
         vid_path = os.path.join(folder_path, "reference_videos.txt")
+        loc_path = os.path.join(folder_path, "location.txt")
         
         get_wikipedia_summary(person, wiki_path)
+        get_location_info(person, loc_path)
         search_and_download_images(person, folder_path)
         search_reference_videos(person, vid_path)
         
