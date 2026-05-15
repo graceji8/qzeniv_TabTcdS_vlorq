@@ -75,8 +75,13 @@ def fetch_processed_people(service):
     checkpoint(f"Fetching processed people list from Drive (Folder: {MATERIALS_FOLDER_ID})...")
     try:
         import upload_results
-        # 1. Get all subfolders in the materials directory
-        folders = upload_results.get_drive_folder_contents(service, MATERIALS_FOLDER_ID)
+        
+        # 1. Get or create the 'materials' subfolder
+        materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
+        if not materials_id:
+            materials_id = upload_results.create_drive_folder(service, "materials", MATERIALS_FOLDER_ID)
+            
+        folders = upload_results.get_drive_folder_contents(service, materials_id) if materials_id else {}
         if not folders:
             PROCESSED_PEOPLE = set()
             checkpoint("No processed folders found.")
@@ -113,7 +118,7 @@ def fetch_processed_people(service):
         PROCESSED_PEOPLE = processed
         if missing_ref:
             checkpoint(f"Folders missing ref.wav (will re-process): {', '.join(missing_ref)}")
-        checkpoint(f"Found {len(PROCESSED_PEOPLE)} fully processed individuals (with ref.wav).")
+        checkpoint(f"Found {len(PROCESSED_PEOPLE)} fully processed individuals (with ref.wav) in 'materials' subfolder.")
     except Exception as e:
         checkpoint(f"Could not fetch processed people list: {e}")
 
@@ -1001,9 +1006,9 @@ def main():
                     try:
                         subprocess.run([
                             "python", upload_script,
-                            folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+                            folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
                         ], check=True)
-                        print(f"Uploaded review files for {person} to Google Drive.", flush=True)
+                        print(f"Uploaded review files for {person} to Google Drive 'materials' subfolder.", flush=True)
                     except Exception as e:
                         print(f"Review upload failed for {person}: {e}", flush=True)
                     continue
@@ -1018,14 +1023,13 @@ def main():
                     print(f"Failed to clone {person}: {e}", flush=True)
                     continue
 
-                # Upload
                 try:
                     subprocess.run([
                         "python", upload_script,
-                        folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6",
+                        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials",
                         "--exclude", "full.wav"
                     ], check=True)
-                    print(f"Uploaded {person} to Google Drive.", flush=True)
+                    print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Upload failed for {person}: {e}", flush=True)
 
