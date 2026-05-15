@@ -9,3 +9,5 @@ google-auth-oauthlib
 yt-dlp
 soundfile
 httpx[socks]
+wikipedia
+duckduckgo-search
