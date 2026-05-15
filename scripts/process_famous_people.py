@@ -29,7 +29,12 @@ socket.setdefaulttimeout(60)
 def checkpoint(msg, **kwargs):
     """Print timestamped message to track execution progress."""
     ts = datetime.now().strftime("%H:%M:%S")
+<<<<<<< HEAD
     kwargs.setdefault("flush", True)
+=======
+    if 'flush' not in kwargs:
+        kwargs['flush'] = True
+>>>>>>> 5737ed63909660185c834ff5d323b2079d20ceaf
     print(f"[{ts}] CHECKPOINT: {msg}", **kwargs)
 
 class TimeoutException(Exception):

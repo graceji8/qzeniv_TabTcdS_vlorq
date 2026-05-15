@@ -188,6 +188,10 @@ def upload_worker(task):
     
     file_name = os.path.basename(local_path)
     
+    mimetype, _ = mimetypes.guess_type(local_path)
+    if not mimetype: mimetype = 'application/octet-stream'
+    media = MediaFileUpload(local_path, mimetype=mimetype, resumable=True)
+
     if existing_file:
         local_md5 = get_md5(local_path)
         if existing_file.get('md5Checksum') == local_md5:
@@ -206,10 +210,7 @@ def upload_worker(task):
     file_metadata = {'name': file_name}
     if parent_id:
         file_metadata['parents'] = [parent_id]
-    mimetype, _ = mimetypes.guess_type(local_path)
-    if not mimetype: mimetype = 'application/octet-stream'
         
-    media = MediaFileUpload(local_path, mimetype=mimetype, resumable=True)
     try:
         service.files().create(
             body=file_metadata, 
