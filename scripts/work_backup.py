@@ -533,9 +533,8 @@ def main():
                 ref_wav = os.path.join(folder_path, "ref.wav")
                 cloned_wav = os.path.join(folder_path, "cloned.wav")
 
-                search_info_txt = os.path.join(folder_path, "search_info.txt")
                 # Clear previous run's files so we re-process fresh each round
-                for f in [full_wav, ref_wav, cloned_wav, search_info_txt]:
+                for f in [full_wav, ref_wav, cloned_wav]:
                     if os.path.exists(f):
                         os.remove(f)
 
@@ -545,13 +544,17 @@ def main():
                 cookies_file = os.path.join(script_dir, "cookies.txt")
 
                 def build_cmd(search_prefix, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file):
+                    # Increase search depth to allow for filtering
+                    prefix_base = search_prefix.split(":")[0]
+                    if prefix_base.endswith("search"):
+                        search_prefix = f"{prefix_base}5:"
+
                     cmd = [
                         sys.executable, "-m", "yt_dlp",
                         f"{search_prefix}{_query}",
                         "-f", "worst",
                         "-x", "--audio-format", "wav",
                         "-o", _full_wav,
-                        "--write-info-json",
                         "--no-playlist", "--retries", "3", "--socket-timeout", "30"
                     ]
                     is_youtube = search_prefix.startswith("ytsearch")
@@ -600,39 +603,10 @@ def main():
                     print(f"Skipping {person} — could not download audio.")
                     continue
 
-                # Get URL and save search info
-                info_url = "URL not found"
-                json_path1 = full_wav.replace('.wav', '.info.json')
-                json_path2 = full_wav + '.info.json'
-                for jp in [json_path1, json_path2]:
-                    if os.path.exists(jp):
-                        try:
-                            import json
-                            with open(jp, 'r', encoding='utf-8') as f:
-                                info_data = json.load(f)
-                                info_url = info_data.get('webpage_url', info_url)
-                        except Exception as e:
-                            print(f"Could not read info json {jp}: {e}")
-                        try:
-                            os.remove(jp)
-                        except: pass
-
-                with open(search_info_txt, "w", encoding="utf-8") as f:
-                    f.write(f"Keywords: {query}\n")
-                    f.write(f"URL: {info_url}\n")
-
                 # VAD
                 success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0)
                 if not success:
-                    print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.")
-                    try:
-                        subprocess.run([
-                            "python", upload_script,
-                            folder_path, "--name", folder_name, "--parent", "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
-                        ], check=True)
-                        print(f"Uploaded review files for {person} to Google Drive.")
-                    except Exception as e:
-                        print(f"Review upload failed for {person}: {e}")
+                    print(f"Failed to find clear speech for {person}.")
                     continue
 
                 # Clone

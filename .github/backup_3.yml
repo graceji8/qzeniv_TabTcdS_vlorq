@@ -1,0 +1,246 @@
+name: auto server
+
+on:
+  # schedule:
+  #   - cron: '0 0,6,12,18 * * *'
+  workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: 'Enable debug mode (keep runner alive if server crashes)'
+        type: boolean
+        default: false
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 360
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup with pip cache ───────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Install dependencies ───────────────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install -U yt-dlp
+
+      # ── 4. Install system dependencies ───────────────────────────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak ffmpeg chromium-browser chromium-chromedriver openssh-server nodejs
+
+      # ── 5. Setup Google Drive Credentials ────────────────────────────────────
+      - name: Setup Google Drive Credentials
+        run: |
+          if [ -n "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" > credentials.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_DRIVE_TOKEN }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
+          fi
+
+      # ── 5b. Write YouTube cookies from secret ────────────────────────────────
+      - name: Write YouTube cookies
+        run: |
+          if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+            echo "# Netscape HTTP Cookie File" > scripts/cookies.txt
+            echo "${{ secrets.YOUTUBE_COOKIES }}" >> scripts/cookies.txt
+            echo "cookies.txt written ($(wc -l < scripts/cookies.txt) lines)"
+          else
+            echo "No YOUTUBE_COOKIES secret found — YouTube will be skipped, SoundCloud only"
+          fi
+
+      # ── 5c. Warm up Chrome to generate cookies ────────────────────────────────
+      - name: Warm up Chrome profile (for yt-dlp cookies)
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          # Launch Chromium headlessly to initialize profile/cookies DB
+          chromium-browser \
+            --no-sandbox \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --user-data-dir="$HOME/.config/chromium" \
+            --headless=new \
+            https://www.youtube.com &
+          CHROME_PID=$!
+          sleep 10
+          kill $CHROME_PID || true
+          echo "Chrome profile initialized at $HOME/.config/chromium"
+          ls "$HOME/.config/chromium/Default/" || echo "Profile dir not found"
+
+      # ── 6. Start Cloudflare tunnel + register URL in KV ──────────────────────
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Start tunnel and register URL
+        run: |
+          # Start a simple status server the tunnel will point to
+          python3 -c "
+          import http.server, threading, json, os
+          class H(http.server.BaseHTTPRequestHandler):
+              def log_message(self, *a): pass
+              def do_GET(self):
+                  self.send_response(200)
+                  self.send_header('Content-Type','application/json')
+                  self.end_headers()
+                  self.wfile.write(json.dumps({'status':'running','run_id':os.environ.get('GITHUB_RUN_ID')}).encode())
+              def do_POST(self):
+                  length = int(self.headers.get('Content-Length', 0))
+                  body = self.rfile.read(length)
+                  print('POST received:', body.decode(), flush=True)
+                  self.send_response(200)
+                  self.end_headers()
+                  self.wfile.write(b'ok')
+          threading.Thread(target=http.server.HTTPServer(('',3000),H).serve_forever, daemon=True).start()
+          import time; time.sleep(999999)
+          " &
+          sleep 2
+
+          # Start tunnel, capture URL
+          cloudflared tunnel --url http://localhost:3000 --logfile tunnel.log &
+          echo "Waiting for tunnel URL..."
+          for i in $(seq 1 30); do
+            TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
+            [ -n "$TUNNEL_URL" ] && break
+            sleep 2
+          done
+
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "ERROR: Could not get tunnel URL"
+            cat tunnel.log
+            exit 1
+          fi
+
+          echo "Tunnel URL: $TUNNEL_URL"
+          echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+
+          # Register URL in Cloudflare KV via Worker
+          curl -fsSL -X POST "https://runner-registry.harryji.workers.dev/register" \
+            -H "Authorization: Bearer ${{ secrets.RUNNER_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\":\"$TUNNEL_URL\",\"run_id\":\"$GITHUB_RUN_ID\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+
+      # ── 6b. Start SSH via Cloudflare ─────────────────────────────────────────
+      - name: Start SSH via Cloudflare
+        if: github.event.inputs.debug_mode == 'true'
+        run: |
+          sudo mkdir -p /var/run/sshd
+          echo "runner:runner" | sudo chpasswd
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+          sudo service ssh start
+
+          cloudflared tunnel --url ssh://localhost:22 --logfile ssh_tunnel.log &
+          echo "Waiting for SSH tunnel URL..."
+          for i in $(seq 1 30); do
+            SSH_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ssh_tunnel.log 2>/dev/null | head -1)
+            [ -n "$SSH_URL" ] && break
+            sleep 2
+          done
+          
+          SSH_HOST=$(echo "$SSH_URL" | sed 's/https:\/\///')
+          
+          echo "=========================================================="
+          echo "  SSH via Cloudflare Tunnel"
+          echo "  Connect command:"
+          echo "  ssh -o ProxyCommand=\"cloudflared access ssh --hostname %h\" runner@$SSH_HOST"
+          echo "  Password: runner"
+          echo "=========================================================="
+
+      # ── 6c. Connect Tailscale ────────────────────────────────────────────────
+      - name: Upgrade Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale version: $(tailscale version)"
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-routes
+
+      # ── 6d. Setup Home Proxy via SSH ─────────────────────────────────────────
+      - name: Setup Home Proxy via SSH
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            # Start SSH SOCKS proxy in background (-f = background, -N = no command, -D = dynamic forwarding)
+            ssh -o StrictHostKeyChecking=no -f -N -D 1080 -p 168 admin@100.65.165.65
+            echo "SSH SOCKS proxy started on port 1080"
+            echo "YTDLP_PROXY=socks5://127.0.0.1:1080" >> $GITHUB_ENV
+          else
+            echo "WARNING: No SSH_PRIVATE_KEY secret found. Skipping home proxy setup."
+          fi
+
+      # ── 7. Run Famous People Processing ──────────────────────────────────────
+      - name: Run process_famous_people.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
+          CLOUDFLARE_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_ACCOUNTS_JSON }}
+          DISPLAY: ':99'
+        run: |
+          # Make the secrets available to SSH interactive shells
+          cat << EOF >> ~/.bashrc
+          export OPENAI_API_KEY="${OPENAI_API_KEY}"
+          export HF_TOKEN="${HF_TOKEN}"
+          export GH_MODELS_TOKEN="${GH_MODELS_TOKEN}"
+          export CLOUDFLARE_ACCOUNTS_JSON='${CLOUDFLARE_ACCOUNTS_JSON}'
+          export DISPLAY=":99"
+          EOF
+
+          source venv/bin/activate
+          mkdir -p logs
+
+          if [ ! -f /tmp/.X99-lock ]; then
+            Xvfb :99 -screen 0 1920x1080x24 &
+            sleep 2
+          fi
+
+          if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
+            echo "Debug mode enabled. Skipping process_famous_people.py..."
+            echo "Sleeping for 6 hours to allow SSH debugging..."
+            sleep 21600
+          else
+            python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
+          fi
+
+      # ── 7b. Keep alive for debugging on failure ──────────────────────────────
+      - name: Keep alive for debugging on failure
+        if: failure() && github.event.inputs.debug_mode == 'true'
+        run: |
+          echo "Workflow failed in debug mode. Keeping runner alive for 6 hours..."
+          sleep 21600
+
+      # ── 8. Deregister tunnel URL on completion ────────────────────────────────
+      - name: Deregister tunnel
+        if: always()
+        run: |
+          curl -fsSL -X DELETE "https://runner-registry.harryji.workers.dev/register" \
+            -H "Authorization: Bearer ${{ secrets.RUNNER_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"run_id\":\"$GITHUB_RUN_ID\"}"
