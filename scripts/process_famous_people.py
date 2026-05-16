@@ -276,6 +276,10 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
         print(f"Error reading audio: {e}", flush=True)
         return False
         
+    if len(data) == 0:
+        print("Audio data is empty.", flush=True)
+        return False
+
     # Process only the first 5 minutes to save memory/time
     max_samples = 5 * 60 * samplerate
     if len(data) > max_samples:
