@@ -12,4 +12,3 @@ httpx[socks]
 wikipedia
 duckduckgo-search
 bing-image-downloader
-fancy-logger
