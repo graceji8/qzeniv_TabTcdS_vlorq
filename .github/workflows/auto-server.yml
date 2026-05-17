@@ -180,18 +180,39 @@ jobs:
           PY
           sleep 2
 
-          # Start tunnel, capture URL
-          cloudflared tunnel --url http://localhost:3000 --logfile tunnel.log &
-          echo "Waiting for tunnel URL..."
-          for i in $(seq 1 30); do
-            TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
+          # Start tunnel, capture URL. Quick tunnels can return transient 500s,
+          # so retry tunnel creation instead of failing the whole run immediately.
+          TUNNEL_URL=""
+          CLOUDFLARED_PID=""
+          for attempt in $(seq 1 5); do
+            rm -f tunnel.log
+            echo "Starting Cloudflare quick tunnel attempt $attempt/5..."
+            cloudflared tunnel --url http://localhost:3000 --logfile tunnel.log &
+            CLOUDFLARED_PID=$!
+
+            echo "Waiting for tunnel URL..."
+            for i in $(seq 1 30); do
+              TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1 || true)
+              [ -n "$TUNNEL_URL" ] && break
+              if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+                echo "cloudflared exited before publishing a URL."
+                break
+              fi
+              sleep 2
+            done
+
             [ -n "$TUNNEL_URL" ] && break
-            sleep 2
+
+            echo "Cloudflare tunnel attempt $attempt failed."
+            cat tunnel.log 2>/dev/null || true
+            kill "$CLOUDFLARED_PID" 2>/dev/null || true
+            wait "$CLOUDFLARED_PID" 2>/dev/null || true
+            sleep $((attempt * 10))
           done
 
           if [ -z "$TUNNEL_URL" ]; then
-            echo "ERROR: Could not get tunnel URL"
-            cat tunnel.log
+            echo "ERROR: Could not get tunnel URL after retries"
+            cat tunnel.log 2>/dev/null || true
             exit 1
           fi
 
@@ -214,13 +235,39 @@ jobs:
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
           sudo service ssh start
 
-          cloudflared tunnel --url ssh://localhost:22 --logfile ssh_tunnel.log &
-          echo "Waiting for SSH tunnel URL..."
-          for i in $(seq 1 30); do
-            SSH_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ssh_tunnel.log 2>/dev/null | head -1)
+          SSH_URL=""
+          SSH_CLOUDFLARED_PID=""
+          for attempt in $(seq 1 5); do
+            rm -f ssh_tunnel.log
+            echo "Starting SSH Cloudflare quick tunnel attempt $attempt/5..."
+            cloudflared tunnel --url ssh://localhost:22 --logfile ssh_tunnel.log &
+            SSH_CLOUDFLARED_PID=$!
+
+            echo "Waiting for SSH tunnel URL..."
+            for i in $(seq 1 30); do
+              SSH_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ssh_tunnel.log 2>/dev/null | head -1 || true)
+              [ -n "$SSH_URL" ] && break
+              if ! kill -0 "$SSH_CLOUDFLARED_PID" 2>/dev/null; then
+                echo "SSH cloudflared exited before publishing a URL."
+                break
+              fi
+              sleep 2
+            done
+
             [ -n "$SSH_URL" ] && break
-            sleep 2
+
+            echo "SSH Cloudflare tunnel attempt $attempt failed."
+            cat ssh_tunnel.log 2>/dev/null || true
+            kill "$SSH_CLOUDFLARED_PID" 2>/dev/null || true
+            wait "$SSH_CLOUDFLARED_PID" 2>/dev/null || true
+            sleep $((attempt * 10))
           done
+
+          if [ -z "$SSH_URL" ]; then
+            echo "ERROR: Could not get SSH tunnel URL after retries"
+            cat ssh_tunnel.log 2>/dev/null || true
+            exit 1
+          fi
           
           SSH_HOST=$(echo "$SSH_URL" | sed 's/https:\/\///')
           
