@@ -1447,15 +1447,18 @@ def main():
                     sample_text = parts[1].strip()
                     target_gender = parts[2].strip() if len(parts) > 2 else None
                     location = parts[3].strip() if len(parts) > 3 else None
-                    source_url = parts[4].strip() if len(parts) > 4 else None
+                    source_hint = parts[4].strip() if len(parts) > 4 else None
                 else:
                     person = item.strip()
                     sample_text = DEFAULT_SAMPLE_TEXT
                     target_gender = None
                     location = None
-                    source_url = None
+                    source_hint = None
 
-                print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location}, URL: {source_url or 'search'})", flush=True)
+                source_url = source_hint if source_hint and source_hint.lower().startswith(("http://", "https://")) else None
+                source_query = source_hint if source_hint and not source_url else None
+
+                print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location}, Source: {source_hint or 'default search'})", flush=True)
 
                 folder_name = person.replace(" ", "_")
                 force_reprocess = person.lower() in FORCE_REPROCESS_PEOPLE
@@ -1521,11 +1524,11 @@ def main():
                     # Download
                     print(f"Downloading audio for {person} (Search index: {search_index})...", flush=True)
                     location_hint = f" {location}" if location else ""
-                    query = f"{person}{location_hint} speaking speech original voice -interpreter -dubbed -translated -translator"
+                    query = source_query or f"{person}{location_hint} speaking speech original voice -interpreter -dubbed -translated -translator"
                     cookies_file = os.path.join(script_dir, "cookies.txt")
 
-                    def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=search_index):
-                        source = source_url or f"{search_type}{item_index}:{_query}"
+                    def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=search_index, direct_url=None):
+                        source = direct_url or f"{search_type}{item_index}:{_query}"
                         cmd = [
                             sys.executable, "-m", "yt_dlp",
                             source,
@@ -1533,12 +1536,14 @@ def main():
                             "-x", "--audio-format", "wav",
                             "-o", _full_wav,
                             "--write-info-json",
-                            "--download-sections", "*0-600",
                             "--retries", "3", "--socket-timeout", "30",
                             "--extractor-args", "youtube:player-client=web,android"
                         ]
-                        if not source_url:
+                        if direct_url:
+                            cmd += ["--no-playlist"]
+                        else:
                             cmd += ["--playlist-items", str(item_index)]
+                            cmd += ["--download-sections", "*0-600"]
                         is_youtube = search_type.startswith("ytsearch") or "youtube.com/" in source or "youtu.be/" in source
                         if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
                             cmd += ["--cookies", _cookies_file]
@@ -1549,8 +1554,17 @@ def main():
 
                     downloaded = False
                     
+                    if source_url:
+                        print(f"Trying direct URL: {source_url}", flush=True)
+                        result = subprocess.run(build_cmd("ytsearch", use_cookies=True, direct_url=source_url), check=False, capture_output=True, text=True)
+                        if result.returncode == 0 and os.path.exists(full_wav):
+                            downloaded = True
+                            print("Downloaded from direct URL.", flush=True)
+                        else:
+                            print(f"Direct URL failed; falling back to search:\n{result.stderr[-500:]}", flush=True)
+
                     # Try YouTube with cookies first
-                    if _is_valid_cookies_file(cookies_file):
+                    if not downloaded and _is_valid_cookies_file(cookies_file):
                         print("Trying YouTube with cookies...", flush=True)
                         result = subprocess.run(build_cmd("ytsearch", use_cookies=True), check=False, capture_output=True, text=True)
                         if result.returncode == 0 and os.path.exists(full_wav):
@@ -1606,6 +1620,8 @@ def main():
                         f.write(f"Keywords: {query}\n")
                         if source_url:
                             f.write(f"Source URL: {source_url}\n")
+                        if source_query:
+                            f.write(f"Source query: {source_query}\n")
                         f.write(f"URL: {info_url}\n")
                         f.write(f"Attempt: {attempt}\n")
                         f.write(f"Search index: {search_index}\n")
