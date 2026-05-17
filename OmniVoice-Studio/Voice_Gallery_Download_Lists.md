@@ -63,6 +63,31 @@ Nelson Mandela|It always seems impossible until it's done.
 Margaret Thatcher|If you want something said, ask a man; if you want something done, ask a woman.
 Bernie Sanders|We need a political revolution of millions of people in this country.
 
+## Trump Administration
+Donald Trump|We will put America first and deliver results for the American people.
+JD Vance|We are focused on rebuilding American industry and defending working families.
+Scott Bessent|A strong economy begins with sound policy and confidence in American growth.
+Todd Blanche|The Department of Justice must protect public safety and uphold the rule of law.
+Doug Burgum|America's energy and natural resources are central to our prosperity and security.
+Doug Collins|Our veterans deserve a government that serves them with clarity and respect.
+Sean Duffy|Modern infrastructure connects families, workers, and businesses across the country.
+Tulsi Gabbard|National security starts with clear judgment and a commitment to the Constitution.
+Jamieson Greer|Fair trade should strengthen American workers, farmers, and manufacturers.
+Pete Hegseth|Peace through strength requires readiness, discipline, and support for our troops.
+Robert F. Kennedy Jr.|Public health policy should be transparent, accountable, and focused on families.
+Kelly Loeffler|Small businesses are the engine of opportunity in communities across America.
+Howard Lutnick|Commerce policy should encourage investment, innovation, and American competitiveness.
+Linda McMahon|Education should prepare every student for opportunity, work, and citizenship.
+Markwayne Mullin|Homeland security requires strength at the border and coordination across government.
+John Ratcliffe|Intelligence must give leaders the facts they need to protect the nation.
+Brooke Rollins|American agriculture feeds the country and anchors communities in every state.
+Marco Rubio|American foreign policy should make our nation stronger, safer, and more prosperous.
+Keith E. Sonderling|Workers and employers both benefit from clear rules and a growing economy.
+Scott Turner|Housing policy should expand opportunity and strengthen communities from the ground up.
+Russ Vought|A responsible budget should reflect national priorities and respect taxpayers.
+Chris Wright|Reliable, affordable energy is essential to prosperity and American leadership.
+Lee Zeldin|Environmental policy should protect communities while allowing the economy to grow.
+
 ## News Anchors
 Anderson Cooper|It's not about me. It's about the people we are covering.
 Tucker Carlson|You can't have a free society if people aren't allowed to say what they think is true.

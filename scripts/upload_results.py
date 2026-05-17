@@ -156,15 +156,44 @@ def get_drive_folder_contents(service, folder_id):
         print(f"DEBUG: Error listing contents of folder '{folder_id}': {e}")
         return {}
 
-def create_drive_folder(service, folder_name, parent_id=None):
+def apply_drive_folder_tags(service, folder_id, tags):
+    if not tags:
+        return
+
+    tag_text = ", ".join(tags)
+    try:
+        service.files().update(
+            fileId=folder_id,
+            body={
+                'description': f"Tags: {tag_text}",
+                'appProperties': {
+                    'tag': tags[0],
+                    'tags': tag_text,
+                },
+            },
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+    except Exception as e:
+        print(f"DEBUG: Error tagging folder '{folder_id}' with '{tag_text}': {e}")
+
+def create_drive_folder(service, folder_name, parent_id=None, tags=None):
     existing_id = get_drive_folder_id(service, folder_name, parent_id)
     if existing_id:
+        apply_drive_folder_tags(service, existing_id, tags)
         return existing_id
 
     file_metadata = {
         'name': folder_name,
         'mimeType': 'application/vnd.google-apps.folder'
     }
+    if tags:
+        tag_text = ", ".join(tags)
+        file_metadata['description'] = f"Tags: {tag_text}"
+        file_metadata['appProperties'] = {
+            'tag': tags[0],
+            'tags': tag_text,
+        }
     if parent_id:
         file_metadata['parents'] = [parent_id]
     
@@ -221,7 +250,7 @@ def upload_worker(task):
     except Exception as e:
         return f"ERROR uploading {file_name}: {e}"
 
-def scan_and_collect(service, local_folder, parent_id=None, drive_folder_name=None, sync=True, exclude=None, include=None, pattern='*', root_path=None):
+def scan_and_collect(service, local_folder, parent_id=None, drive_folder_name=None, sync=True, exclude=None, include=None, pattern='*', root_path=None, tags=None):
     if not exclude: exclude = []
     if not include: include = []
     if not root_path: root_path = local_folder
@@ -254,7 +283,7 @@ def scan_and_collect(service, local_folder, parent_id=None, drive_folder_name=No
             if not is_match and not is_parent:
                 return []
 
-    drive_folder_id = create_drive_folder(service, drive_folder_name, parent_id)
+    drive_folder_id = create_drive_folder(service, drive_folder_name, parent_id, tags=tags)
     if not drive_folder_id:
         print(f"ERROR: Could not get/create Drive folder '{drive_folder_name}'. Cannot proceed with upload.")
         return []
@@ -294,7 +323,7 @@ def scan_and_collect(service, local_folder, parent_id=None, drive_folder_name=No
                 continue
 
         if os.path.isdir(item_path):
-            tasks.extend(scan_and_collect(service, item_path, drive_folder_id, sync=sync, exclude=exclude, include=include, pattern=pattern, root_path=root_path))
+            tasks.extend(scan_and_collect(service, item_path, drive_folder_id, sync=sync, exclude=exclude, include=include, pattern=pattern, root_path=root_path, tags=tags))
         else:
             if not fnmatch.fnmatch(item, pattern):
                 continue
@@ -314,6 +343,7 @@ def main():
     parser.add_argument('--pattern', type=str, default='*', help='Glob pattern for files.')
     parser.add_argument('--threads', type=int, default=20, help='Parallel threads.')
     parser.add_argument('--no-sync', action='store_false', dest='sync', help='Disable sync.')
+    parser.add_argument('--tag', action='append', default=[], help='Tag metadata to add to created Drive folders.')
     args = parser.parse_args()
 
     local_path = os.path.abspath(args.folder)
@@ -328,7 +358,7 @@ def main():
         parent_id = create_drive_folder(service, args.parent_name, parent_id)
         if not parent_id: return
             
-    all_tasks = scan_and_collect(service, local_path, parent_id, args.name, args.sync, args.exclude, args.include, args.pattern, local_path)
+    all_tasks = scan_and_collect(service, local_path, parent_id, args.name, args.sync, args.exclude, args.include, args.pattern, local_path, tags=args.tag)
     
     total = len(all_tasks)
     if total == 0:

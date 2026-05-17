@@ -5,6 +5,8 @@ import sys
 os.environ["YTDLP_PROXY"] = "socks5://127.0.0.1:1080"
 os.environ["http_proxy"] = "socks5://127.0.0.1:1080"
 os.environ["https_proxy"] = "socks5://127.0.0.1:1080"
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
 
 import time
 import subprocess
@@ -26,10 +28,11 @@ from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 # Set global socket timeout to 60 seconds
 socket.setdefaulttimeout(60)
 
-def checkpoint(msg):
+def checkpoint(msg, **kwargs):
     """Print timestamped message to track execution progress."""
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] CHECKPOINT: {msg}", flush=True)
+    kwargs.setdefault("flush", True)
+    print(f"[{ts}] CHECKPOINT: {msg}", **kwargs)
 
 class TimeoutException(Exception):
     pass
@@ -65,6 +68,48 @@ _VAD_MODEL = None
 _VAD_UTILS = None
 PROCESSED_PEOPLE = set()
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+TRUMP_TEAM_NAMES = {
+    "donald trump",
+    "jd vance",
+    "scott bessent",
+    "todd blanche",
+    "doug burgum",
+    "doug collins",
+    "sean duffy",
+    "tulsi gabbard",
+    "jamieson greer",
+    "pete hegseth",
+    "robert f. kennedy jr.",
+    "kelly loeffler",
+    "howard lutnick",
+    "linda mcmahon",
+    "markwayne mullin",
+    "john ratcliffe",
+    "brooke rollins",
+    "marco rubio",
+    "keith e. sonderling",
+    "scott turner",
+    "russ vought",
+    "chris wright",
+    "lee zeldin",
+}
+
+def post_to_local_api(url, **kwargs):
+    """Call localhost API without inheriting the global SOCKS proxy."""
+    session = requests.Session()
+    session.trust_env = False
+    return session.post(url, **kwargs)
+
+def build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=None):
+    cmd = [
+        "python", upload_script,
+        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
+    ]
+    if not include_full_wav:
+        cmd += ["--exclude", "full.wav"]
+    if person and person.strip().lower() in TRUMP_TEAM_NAMES:
+        cmd += ["--tag", "Trump Team"]
+    return cmd
 
 def fetch_processed_people(service):
     """Fetch all folder names from the materials directory that HAVE a ref.wav file."""
@@ -137,6 +182,7 @@ def get_category_map():
         "marvel": "marvel",
         "celebrities": "celebs",
         "politicians": "politicians",
+        "trump administration": "politicians",
         "news anchors": "news",
         "gaming": "gaming",
         "books/movies": "books",
@@ -199,7 +245,7 @@ def sync_drive_to_api(service):
                     _, done = downloader.next_chunk()
                 fh.seek(0)
                 
-                requests.post(
+                post_to_local_api(
                     f"{api_url}/gallery/upload",
                     data={
                         "name": clean_name,
@@ -1025,10 +1071,10 @@ def main():
                 if not success:
                     print(f"Failed to find clear speech for {person}. Uploading to Google Drive for review.", flush=True)
                     try:
-                        subprocess.run([
-                            "python", upload_script,
-                            folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
-                        ], check=True)
+                        subprocess.run(
+                            build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=person),
+                            check=True
+                        )
                         print(f"Uploaded review files for {person} to Google Drive 'materials' subfolder.", flush=True)
                     except Exception as e:
                         print(f"Review upload failed for {person}: {e}", flush=True)
@@ -1045,12 +1091,13 @@ def main():
                     continue
 
                 try:
-                    subprocess.run([
-                        "python", upload_script,
-                        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials",
-                        "--exclude", "full.wav"
-                    ], check=True)
+                    subprocess.run(
+                        build_upload_command(upload_script, folder_path, folder_name, include_full_wav=False, person=person),
+                        check=True
+                    )
                     print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
+                    PROCESSED_PEOPLE.add(person.lower())
+                    print(f"PASS: {person} completed after Drive upload.", flush=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Upload failed for {person}: {e}", flush=True)
 
@@ -1058,7 +1105,7 @@ def main():
                 try:
                     api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
                     with open(ref_wav, "rb") as f:
-                        resp = requests.post(
+                        resp = post_to_local_api(
                             f"{api_url}/gallery/upload",
                             data={
                                 "name": person,
@@ -1067,14 +1114,14 @@ def main():
                                 "description": f"Generated from YouTube. Search: {query}"
                             },
                             files={"audio": ("ref.wav", f, "audio/wav")},
-                            timeout=30
+                            timeout=5
                         )
                     if resp.status_code == 200:
                         print(f"Uploaded {person} to local OmniVoice API.", flush=True)
                     else:
                         print(f"Failed to upload {person} to API: {resp.status_code} {resp.text}", flush=True)
                 except Exception as e:
-                    print(f"API upload failed for {person}: {e}", flush=True)
+                    print(f"Optional API upload skipped/failed for {person}: {e}", flush=True)
 
             print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)

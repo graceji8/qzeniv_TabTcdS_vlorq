@@ -5,6 +5,8 @@ import sys
 os.environ["YTDLP_PROXY"] = "socks5://127.0.0.1:1080"
 os.environ["http_proxy"] = "socks5://127.0.0.1:1080"
 os.environ["https_proxy"] = "socks5://127.0.0.1:1080"
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
 
 import time
 import subprocess
@@ -66,6 +68,65 @@ _VAD_MODEL = None
 _VAD_UTILS = None
 PROCESSED_PEOPLE = set()
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+
+TRUMP_ADMIN_TEAM = [
+    "Donald Trump|We will put America first and deliver results for the American people.|male|United States",
+    "JD Vance|We are focused on rebuilding American industry and defending working families.|male|United States",
+    "Scott Bessent|A strong economy begins with sound policy and confidence in American growth.|male|United States",
+    "Todd Blanche|The Department of Justice must protect public safety and uphold the rule of law.|male|United States",
+    "Doug Burgum|America's energy and natural resources are central to our prosperity and security.|male|United States",
+    "Doug Collins|Our veterans deserve a government that serves them with clarity and respect.|male|United States",
+    "Sean Duffy|Modern infrastructure connects families, workers, and businesses across the country.|male|United States",
+    "Tulsi Gabbard|National security starts with clear judgment and a commitment to the Constitution.|female|United States",
+    "Jamieson Greer|Fair trade should strengthen American workers, farmers, and manufacturers.|male|United States",
+    "Pete Hegseth|Peace through strength requires readiness, discipline, and support for our troops.|male|United States",
+    "Robert F. Kennedy Jr.|Public health policy should be transparent, accountable, and focused on families.|male|United States",
+    "Kelly Loeffler|Small businesses are the engine of opportunity in communities across America.|female|United States",
+    "Howard Lutnick|Commerce policy should encourage investment, innovation, and American competitiveness.|male|United States",
+    "Linda McMahon|Education should prepare every student for opportunity, work, and citizenship.|female|United States",
+    "Markwayne Mullin|Homeland security requires strength at the border and coordination across government.|male|United States",
+    "John Ratcliffe|Intelligence must give leaders the facts they need to protect the nation.|male|United States",
+    "Brooke Rollins|American agriculture feeds the country and anchors communities in every state.|female|United States",
+    "Marco Rubio|American foreign policy should make our nation stronger, safer, and more prosperous.|male|United States",
+    "Keith E. Sonderling|Workers and employers both benefit from clear rules and a growing economy.|male|United States",
+    "Scott Turner|Housing policy should expand opportunity and strengthen communities from the ground up.|male|United States",
+    "Russ Vought|A responsible budget should reflect national priorities and respect taxpayers.|male|United States",
+    "Chris Wright|Reliable, affordable energy is essential to prosperity and American leadership.|male|United States",
+    "Lee Zeldin|Environmental policy should protect communities while allowing the economy to grow.|male|United States",
+]
+
+def post_to_local_api(url, **kwargs):
+    """Call localhost API without inheriting the global SOCKS proxy."""
+    session = requests.Session()
+    session.trust_env = False
+    return session.post(url, **kwargs)
+
+def get_trump_admin_team_list():
+    filtered_people = []
+    for item in TRUMP_ADMIN_TEAM:
+        name = item.split("|")[0].strip().lower()
+        if name in PROCESSED_PEOPLE:
+            checkpoint(f"Trump admin team list already processed '{name}'. Skipping.")
+            continue
+        filtered_people.append(item)
+    return filtered_people
+
+def is_trump_admin_team_member(person):
+    return person.strip().lower() in {
+        item.split("|")[0].strip().lower()
+        for item in TRUMP_ADMIN_TEAM
+    }
+
+def build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=None):
+    cmd = [
+        "python", upload_script,
+        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
+    ]
+    if not include_full_wav:
+        cmd += ["--exclude", "full.wav"]
+    if person and is_trump_admin_team_member(person):
+        cmd += ["--tag", "Trump Team"]
+    return cmd
 
 def fetch_processed_people(service):
     """Fetch all folder names from the materials directory that HAVE a ref.wav file."""
@@ -165,7 +226,7 @@ def sync_drive_to_api(service):
                     _, done = downloader.next_chunk()
                 fh.seek(0)
                 
-                requests.post(
+                post_to_local_api(
                     f"{api_url}/gallery/upload",
                     data={
                         "name": clean_name,
@@ -689,10 +750,23 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
+        if os.environ.get("FAMOUS_PEOPLE_LIST", "trump_admin_team").lower() == "trump_admin_team":
+            people = get_trump_admin_team_list()
+            if people:
+                checkpoint(f"Using Trump administration team list with {len(people)} entries.")
+                return people
         return generate_famous_people_with_ai(None)
 
     # Fetch processed people cache first
     fetch_processed_people(service)
+
+    list_name = os.environ.get("FAMOUS_PEOPLE_LIST", "trump_admin_team").strip().lower()
+    if list_name == "trump_admin_team":
+        people = get_trump_admin_team_list()
+        if people:
+            checkpoint(f"Using Trump administration team list with {len(people)} unprocessed entries.")
+            return people
+        checkpoint("Trump administration team list is exhausted; falling back to AI generation.")
 
     # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
     people = generate_famous_people_with_ai(service)
@@ -962,13 +1036,15 @@ def main():
                 service = get_drive_service()
                 if service:
                     import upload_results
-                    person_folder_id = upload_results.get_drive_folder_id(service, folder_name, MATERIALS_FOLDER_ID)
-                    if person_folder_id:
-                        contents = upload_results.get_drive_folder_contents(service, person_folder_id)
-                        if "ref.wav" in contents:
-                            checkpoint(f"Skipping {person} — ref.wav actually exists on Drive.", flush=True)
-                            PROCESSED_PEOPLE.add(person.lower())
-                            continue
+                    materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
+                    if materials_id:
+                        person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
+                        if person_folder_id:
+                            contents = upload_results.get_drive_folder_contents(service, person_folder_id)
+                            if "ref.wav" in contents:
+                                checkpoint(f"Skipping {person} — ref.wav actually exists on Drive.", flush=True)
+                                PROCESSED_PEOPLE.add(person.lower())
+                                continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
                 os.makedirs(temp_base, exist_ok=True)
                 folder_path = os.path.join(temp_base, folder_name)
@@ -1095,10 +1171,10 @@ def main():
                 if not success:
                     print(f"Failed to find clear speech for {person} after {max_attempts} attempts. Uploading to Google Drive for review.", flush=True)
                     try:
-                        subprocess.run([
-                            "python", upload_script,
-                            folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
-                        ], check=True)
+                        subprocess.run(
+                            build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=person),
+                            check=True
+                        )
                         print(f"Uploaded review files for {person} to Google Drive 'materials' subfolder.", flush=True)
                     except Exception as e:
                         print(f"Review upload failed for {person}: {e}", flush=True)
@@ -1115,12 +1191,13 @@ def main():
                     continue
 
                 try:
-                    subprocess.run([
-                        "python", upload_script,
-                        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials",
-                        "--exclude", "full.wav"
-                    ], check=True)
+                    subprocess.run(
+                        build_upload_command(upload_script, folder_path, folder_name, include_full_wav=False, person=person),
+                        check=True
+                    )
                     print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
+                    PROCESSED_PEOPLE.add(person.lower())
+                    print(f"PASS: {person} completed after Drive upload.", flush=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Upload failed for {person}: {e}", flush=True)
 
@@ -1128,7 +1205,7 @@ def main():
                 try:
                     api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
                     with open(ref_wav, "rb") as f:
-                        resp = requests.post(
+                        resp = post_to_local_api(
                             f"{api_url}/gallery/upload",
                             data={
                                 "name": person,
@@ -1137,14 +1214,14 @@ def main():
                                 "description": f"Generated from YouTube. Location: {location or 'Unknown'}. Search: {query}"
                             },
                             files={"audio": ("ref.wav", f, "audio/wav")},
-                            timeout=30
+                            timeout=5
                         )
                     if resp.status_code == 200:
                         print(f"Uploaded {person} to local OmniVoice API.", flush=True)
                     else:
                         print(f"Failed to upload {person} to API: {resp.status_code} {resp.text}", flush=True)
                 except Exception as e:
-                    print(f"API upload failed for {person}: {e}", flush=True)
+                    print(f"Optional API upload skipped/failed for {person}: {e}", flush=True)
 
             print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)
