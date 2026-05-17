@@ -71,6 +71,7 @@ huggingface_hub.logging.set_verbosity_error()
 _VAD_MODEL = None
 _VAD_UTILS = None
 PROCESSED_PEOPLE = set()
+NESTED_MATERIALS_MERGE_CHECKED = False
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DYNAMIC_PEOPLE_FILE = os.environ.get(
@@ -79,6 +80,7 @@ DYNAMIC_PEOPLE_FILE = os.environ.get(
 )
 DYNAMIC_PEOPLE_LOCK = threading.RLock()
 DEFAULT_SAMPLE_TEXT = "You're so lucky. You are so lucky to be an opera singer. I mean this."
+VAD_ATTEMPT_TIMEOUT_SECONDS = int(os.environ.get("FAMOUS_PEOPLE_VAD_TIMEOUT_SECONDS", "240"))
 
 TRUMP_ADMIN_TEAM = [
     "Donald Trump|We will put America first and deliver results for the American people.|male|United States",
@@ -341,7 +343,7 @@ def get_upload_tag_for_person(person):
 def build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=None):
     cmd = [
         "python", upload_script,
-        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID, "--parent-name", "materials"
+        folder_path, "--name", folder_name, "--parent", MATERIALS_FOLDER_ID
     ]
     if not include_full_wav:
         cmd += ["--exclude", "full.wav"]
@@ -349,6 +351,123 @@ def build_upload_command(upload_script, folder_path, folder_name, include_full_w
     if upload_tag:
         cmd += ["--tag", upload_tag]
     return cmd
+
+def _move_drive_item(service, item_id, old_parent_id, new_parent_id):
+    service.files().update(
+        fileId=item_id,
+        addParents=new_parent_id,
+        removeParents=old_parent_id,
+        fields="id, parents",
+        supportsAllDrives=True
+    ).execute()
+
+def drive_query_string(value):
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+def list_drive_child_folders(service, parent_id, folder_name=None):
+    query = f"{drive_query_string(parent_id)} in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    if folder_name:
+        query += f" and name = {drive_query_string(folder_name)}"
+
+    folders = []
+    page_token = None
+    while True:
+        results = service.files().list(
+            q=query,
+            fields="nextPageToken, files(id, name, mimeType)",
+            pageToken=page_token,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+        folders.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    return folders
+
+def drive_folder_has_ref(service, folder_id):
+    query = f"name = 'ref.wav' and {drive_query_string(folder_id)} in parents and trashed = false"
+    results = service.files().list(
+        q=query,
+        fields="files(id)",
+        pageSize=1,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
+    return bool(results.get("files"))
+
+def drive_person_has_ref(service, person_folder_name):
+    folders = list_drive_child_folders(service, MATERIALS_FOLDER_ID, person_folder_name)
+    for folder in folders:
+        if drive_folder_has_ref(service, folder["id"]):
+            return True
+    return False
+
+def _merge_drive_folder_contents(service, source_folder_id, destination_folder_id):
+    import upload_results
+
+    moved_count = 0
+    source_contents = upload_results.get_drive_folder_contents(service, source_folder_id)
+    destination_contents = upload_results.get_drive_folder_contents(service, destination_folder_id)
+
+    for name, source_info in source_contents.items():
+        destination_info = destination_contents.get(name)
+        if not destination_info:
+            _move_drive_item(service, source_info["id"], source_folder_id, destination_folder_id)
+            moved_count += 1
+            continue
+
+        source_is_folder = source_info.get("mimeType") == "application/vnd.google-apps.folder"
+        destination_is_folder = destination_info.get("mimeType") == "application/vnd.google-apps.folder"
+        if source_is_folder and destination_is_folder:
+            moved_count += _merge_drive_folder_contents(service, source_info["id"], destination_info["id"])
+            if not upload_results.get_drive_folder_contents(service, source_info["id"]):
+                service.files().update(
+                    fileId=source_info["id"],
+                    body={"trashed": True},
+                    fields="id, trashed",
+                    supportsAllDrives=True
+                ).execute()
+            continue
+
+        checkpoint(f"Nested materials item '{name}' already exists in materials; leaving duplicate in nested folder.")
+
+    return moved_count
+
+def merge_nested_materials_folder(service):
+    """Move anything accidentally saved in materials/materials back into materials."""
+    global NESTED_MATERIALS_MERGE_CHECKED
+    if NESTED_MATERIALS_MERGE_CHECKED:
+        return
+    if not service:
+        return
+
+    try:
+        import upload_results
+
+        nested_materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
+        if not nested_materials_id:
+            NESTED_MATERIALS_MERGE_CHECKED = True
+            return
+
+        moved_count = _merge_drive_folder_contents(service, nested_materials_id, MATERIALS_FOLDER_ID)
+        remaining = upload_results.get_drive_folder_contents(service, nested_materials_id)
+        if not remaining:
+            try:
+                service.files().update(
+                    fileId=nested_materials_id,
+                    body={"trashed": True},
+                    fields="id, trashed",
+                    supportsAllDrives=True
+                ).execute()
+                checkpoint(f"Merged {moved_count} item(s) from nested materials folder and trashed the empty duplicate folder.")
+            except Exception as e:
+                checkpoint(f"Merged {moved_count} item(s); nested materials is empty but Drive refused to trash it: {e}")
+        else:
+            checkpoint(f"Merged {moved_count} item(s) from nested materials folder; {len(remaining)} conflicting item(s) remain there.")
+        NESTED_MATERIALS_MERGE_CHECKED = True
+    except Exception as e:
+        checkpoint(f"Could not merge nested materials folder: {e}")
 
 def fetch_processed_people(service):
     """Fetch all folder names from the materials directory that HAVE a ref.wav file."""
@@ -359,13 +478,9 @@ def fetch_processed_people(service):
     checkpoint(f"Fetching processed people list from Drive (Folder: {MATERIALS_FOLDER_ID})...")
     try:
         import upload_results
-        
-        # 1. Get or create the 'materials' subfolder
-        materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
-        if not materials_id:
-            materials_id = upload_results.create_drive_folder(service, "materials", MATERIALS_FOLDER_ID)
-            
-        folders = upload_results.get_drive_folder_contents(service, materials_id) if materials_id else {}
+
+        merge_nested_materials_folder(service)
+        folders = list_drive_child_folders(service, MATERIALS_FOLDER_ID)
         if not folders:
             PROCESSED_PEOPLE = set()
             checkpoint("No processed folders found.")
@@ -393,8 +508,9 @@ def fetch_processed_people(service):
         # 3. Only count as processed if the folder name exists AND it has a ref.wav
         processed = set()
         missing_ref = []
-        for name, info in folders.items():
-            if info['id'] in ref_parents:
+        for info in folders:
+            name = info["name"]
+            if info["id"] in ref_parents:
                 processed.add(name.replace("_", " ").strip().lower())
             else:
                 missing_ref.append(name)
@@ -402,7 +518,7 @@ def fetch_processed_people(service):
         PROCESSED_PEOPLE = processed
         if missing_ref:
             checkpoint(f"Folders missing ref.wav (will re-process): {', '.join(missing_ref)}")
-        checkpoint(f"Found {len(PROCESSED_PEOPLE)} fully processed individuals (with ref.wav) in 'materials' subfolder.")
+        checkpoint(f"Found {len(PROCESSED_PEOPLE)} fully processed individuals (with ref.wav) in materials.")
     except Exception as e:
         checkpoint(f"Could not fetch processed people list: {e}")
 
@@ -422,10 +538,8 @@ def sync_drive_to_api(service):
         return
         
     import upload_results
-    materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
-    if not materials_id:
-        return
-    folders = upload_results.get_drive_folder_contents(service, materials_id)
+    merge_nested_materials_folder(service)
+    folders = upload_results.get_drive_folder_contents(service, MATERIALS_FOLDER_ID)
     
     synced_count = 0
     for name, info in folders.items():
@@ -546,6 +660,21 @@ def detect_gender_from_pitch(wav_tensor, sample_rate):
         print(f"Pitch detection error: {e}")
         return "unknown", 0
 
+def read_audio_prefix(audio_path, max_seconds=300):
+    """Read only the first max_seconds of audio so long videos cannot exhaust runner memory."""
+    with sf.SoundFile(audio_path) as audio_file:
+        samplerate = audio_file.samplerate
+        max_frames = int(max_seconds * samplerate)
+        data = audio_file.read(frames=max_frames, dtype="float32", always_2d=False)
+        total_seconds = audio_file.frames / samplerate if samplerate else 0
+        loaded_seconds = len(data) / samplerate if samplerate and hasattr(data, "__len__") else 0
+    print(
+        f"Loaded {loaded_seconds:.1f}s of audio for VAD "
+        f"(source duration {total_seconds:.1f}s, sample rate {samplerate}).",
+        flush=True
+    )
+    return data, samplerate
+
 def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_model=None, person_name=None, target_gender=None):
     print(f"Using AI (Silero VAD) to find clear speech in {full_wav_path} (Target Gender: {target_gender})...", flush=True)
     model, utils = get_vad_model()
@@ -555,7 +684,7 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
     get_speech_timestamps = utils[0]
     
     try:
-        data, samplerate = sf.read(full_wav_path)
+        data, samplerate = read_audio_prefix(full_wav_path, max_seconds=300)
     except Exception as e:
         print(f"Error reading audio: {e}", flush=True)
         return False
@@ -564,11 +693,6 @@ def extract_clear_speech(full_wav_path, ref_wav_path, target_duration=8.0, asr_m
         print("Audio data is empty.", flush=True)
         return False
 
-    # Process only the first 5 minutes to save memory/time
-    max_samples = 5 * 60 * samplerate
-    if len(data) > max_samples:
-        data = data[:max_samples]
-        
     wav = torch.tensor(data, dtype=torch.float32)
     if wav.ndim > 1:
         wav = wav.mean(dim=1)
@@ -1273,8 +1397,15 @@ def main():
                 # Extra check for ref.wav if cache might be stale
                 service = get_drive_service()
                 if service:
+                    merge_nested_materials_folder(service)
+                    if drive_person_has_ref(service, folder_name):
+                        checkpoint(f"Skipping {person} because ref.wav exists in at least one matching Drive folder.", flush=True)
+                        PROCESSED_PEOPLE.add(person.lower())
+                        remove_dynamic_person(person)
+                        continue
                     import upload_results
-                    materials_id = upload_results.get_drive_folder_id(service, "materials", MATERIALS_FOLDER_ID)
+                    merge_nested_materials_folder(service)
+                    materials_id = MATERIALS_FOLDER_ID
                     if materials_id:
                         person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
                         if person_folder_id:
@@ -1327,6 +1458,7 @@ def main():
                             "-x", "--audio-format", "wav",
                             "-o", _full_wav,
                             "--write-info-json",
+                            "--download-sections", "*0-600",
                             "--retries", "3", "--socket-timeout", "30",
                             "--extractor-args", "youtube:player-client=web,android"
                         ]
@@ -1401,7 +1533,22 @@ def main():
                             f.write(f"Location: {location}\n")
 
                     # VAD
-                    success = extract_clear_speech(full_wav, ref_wav, target_duration=8.0, asr_model=model, person_name=person, target_gender=target_gender)
+                    try:
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(VAD_ATTEMPT_TIMEOUT_SECONDS)
+                        success = extract_clear_speech(
+                            full_wav,
+                            ref_wav,
+                            target_duration=8.0,
+                            asr_model=model,
+                            person_name=person,
+                            target_gender=target_gender
+                        )
+                    except TimeoutException:
+                        success = False
+                        print(f"VAD timed out after {VAD_ATTEMPT_TIMEOUT_SECONDS}s for {person}.", flush=True)
+                    finally:
+                        signal.alarm(0)
                     if success:
                         break # Found clear speech!
                     else:
@@ -1414,7 +1561,7 @@ def main():
                             build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=person),
                             check=True
                         )
-                        print(f"Uploaded review files for {person} to Google Drive 'materials' subfolder.", flush=True)
+                        print(f"Uploaded review files for {person} to Google Drive materials.", flush=True)
                     except Exception as e:
                         print(f"Review upload failed for {person}: {e}", flush=True)
                     continue
@@ -1434,7 +1581,7 @@ def main():
                         build_upload_command(upload_script, folder_path, folder_name, include_full_wav=False, person=person),
                         check=True
                     )
-                    print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
+                    print(f"Uploaded {person} to Google Drive materials.", flush=True)
                     PROCESSED_PEOPLE.add(person.lower())
                     remove_dynamic_person(person)
                     print(f"PASS: {person} completed after Drive upload.", flush=True)
