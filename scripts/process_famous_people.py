@@ -71,6 +71,9 @@ huggingface_hub.logging.set_verbosity_error()
 _VAD_MODEL = None
 _VAD_UTILS = None
 PROCESSED_PEOPLE = set()
+FORCE_REPROCESS_PEOPLE = set()
+WRONG_VOICE_PEOPLE = set()
+WRONG_VOICE_ATTEMPTED_PEOPLE = set()
 NESTED_MATERIALS_MERGE_CHECKED = False
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +84,12 @@ DYNAMIC_PEOPLE_FILE = os.environ.get(
 DYNAMIC_PEOPLE_LOCK = threading.RLock()
 DEFAULT_SAMPLE_TEXT = "You're so lucky. You are so lucky to be an opera singer. I mean this."
 VAD_ATTEMPT_TIMEOUT_SECONDS = int(os.environ.get("FAMOUS_PEOPLE_VAD_TIMEOUT_SECONDS", "240"))
+FORCE_REPROCESS_SEARCH_OFFSET = int(os.environ.get("FAMOUS_PEOPLE_FORCE_REPROCESS_SEARCH_OFFSET", "1"))
+DEFAULT_EMAIL_SOLUTIONS_CONTACTS_FILE = r"C:\email_solutions\public\config\contacts.json"
+WRONG_VOICE_CONTACTS_FILE = os.environ.get("WRONG_VOICE_CONTACTS_FILE", DEFAULT_EMAIL_SOLUTIONS_CONTACTS_FILE)
+WRONG_VOICE_FIRST = os.environ.get("FAMOUS_PEOPLE_WRONG_VOICE_FIRST", "1").strip().lower() not in {"0", "false", "no"}
+PRESET_LISTS_ENABLED = os.environ.get("FAMOUS_PEOPLE_PRESET_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+AI_FALLBACK_ENABLED = os.environ.get("FAMOUS_PEOPLE_AI_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
 
 TRUMP_ADMIN_TEAM = [
     "Donald Trump|We will put America first and deliver results for the American people.|male|United States",
@@ -247,8 +256,53 @@ def get_dynamic_people_list():
             checkpoint(f"Removed {len(removed)} duplicate/already processed dynamic queue entries.")
 
     if pending:
+        for item in pending:
+            FORCE_REPROCESS_PEOPLE.add(get_person_name(item).lower())
         checkpoint(f"Using dynamic people queue first with {len(pending)} pending entries.")
     return pending
+
+def get_wrong_voice_people_from_contacts():
+    if not WRONG_VOICE_FIRST:
+        return []
+    if not WRONG_VOICE_CONTACTS_FILE or not os.path.exists(WRONG_VOICE_CONTACTS_FILE):
+        return []
+
+    try:
+        with open(WRONG_VOICE_CONTACTS_FILE, "r", encoding="utf-8") as f:
+            contacts = json.load(f)
+    except Exception as e:
+        checkpoint(f"Could not read wrong voice contacts file '{WRONG_VOICE_CONTACTS_FILE}': {e}")
+        return []
+
+    people = []
+    seen = set()
+    for contact in contacts if isinstance(contacts, list) else []:
+        if not isinstance(contact, dict):
+            continue
+        has_redo = bool(contact.get("voiceRedo", {}).get("referWav") or contact.get("voiceRedo", {}).get("cloneWav"))
+        if contact.get("group") != "politicians" or (contact.get("voiceStatus") != "wrong" and not has_redo):
+            continue
+
+        name = (contact.get("name") or "").strip()
+        if not name:
+            continue
+        name_key = name.lower()
+        if name_key in WRONG_VOICE_ATTEMPTED_PEOPLE:
+            continue
+        if name_key in seen:
+            continue
+        seen.add(name_key)
+
+        quote = (contact.get("quote") or contact.get("notes") or DEFAULT_SAMPLE_TEXT).strip().replace("\n", " ")
+        gender = (contact.get("gender") or "").strip()
+        country = (contact.get("location") or contact.get("country") or "").strip()
+        people.append("|".join([name, quote, gender, country]))
+        WRONG_VOICE_PEOPLE.add(name_key)
+        FORCE_REPROCESS_PEOPLE.add(name_key)
+
+    if people:
+        checkpoint(f"Using {len(people)} wrong voice people from {WRONG_VOICE_CONTACTS_FILE}.")
+    return people
 
 def start_dynamic_people_api():
     if os.environ.get("FAMOUS_PEOPLE_DYNAMIC_API", "1").strip().lower() in {"0", "false", "no"}:
@@ -1098,7 +1152,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
         list_name = get_active_preset_name()
-        if list_name in PRESET_PEOPLE_LISTS:
+        if PRESET_LISTS_ENABLED and list_name in PRESET_PEOPLE_LISTS:
             people = get_preset_people_list(list_name)
             if people:
                 checkpoint(f"Using {PRESET_PEOPLE_LISTS[list_name]['label']} with {len(people)} entries.")
@@ -1109,7 +1163,7 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
     fetch_processed_people(service)
 
     list_name = get_active_preset_name()
-    if list_name in PRESET_PEOPLE_LISTS:
+    if PRESET_LISTS_ENABLED and list_name in PRESET_PEOPLE_LISTS:
         people = get_preset_people_list(list_name)
         if people:
             checkpoint(f"Using {PRESET_PEOPLE_LISTS[list_name]['label']} with {len(people)} unprocessed entries.")
@@ -1117,6 +1171,10 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
         checkpoint(f"{PRESET_PEOPLE_LISTS[list_name]['label']} is exhausted; falling back to AI generation.")
         if os.environ.get("FAMOUS_PEOPLE_PRESET_ONLY", "").strip().lower() in {"1", "true", "yes"}:
             return []
+
+    if not AI_FALLBACK_ENABLED:
+        checkpoint("AI fallback is disabled. No generated people will be processed.")
+        return []
 
     # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
     people = generate_famous_people_with_ai(service)
@@ -1183,6 +1241,7 @@ def upload_model_to_drive(service, local_model_path, folder_name="OmniVoice_mode
 
 def main():
     checkpoint("Starting process_famous_people.py")
+    checkpoint(f"Process Voice List queue file: {DYNAMIC_PEOPLE_FILE}")
     start_dynamic_people_api()
     
     # Check proxy first
@@ -1337,16 +1396,26 @@ def main():
         print(f"{'#'*40}", flush=True)
 
         dynamic_people_data = get_dynamic_people_list()
+        wrong_voice_people_data = get_wrong_voice_people_from_contacts()
         target_person_env = os.environ.get("TARGET_PERSON")
         using_target_person = False
         if dynamic_people_data:
             famous_people_data = dynamic_people_data
+            if wrong_voice_people_data:
+                print("Process Voice List queue has priority; wrong voice contacts will run after the queue is empty.", flush=True)
             if target_person_env:
-                print(f"Dynamic people queue has priority; TARGET_PERSON will run after the queue is empty: {target_person_env}", flush=True)
+                print(f"Process Voice List queue has priority; TARGET_PERSON will run after the queue is empty: {target_person_env}", flush=True)
+        elif wrong_voice_people_data:
+            famous_people_data = wrong_voice_people_data
+            if target_person_env:
+                print(f"Wrong voice contacts have priority; TARGET_PERSON will run after wrong voices are done: {target_person_env}", flush=True)
         elif target_person_env:
             using_target_person = True
             famous_people_data = [target_person_env]
             print(f"Using specific TARGET_PERSON: {target_person_env}", flush=True)
+        elif WRONG_VOICE_FIRST and WRONG_VOICE_CONTACTS_FILE and os.path.exists(WRONG_VOICE_CONTACTS_FILE):
+            famous_people_data = []
+            checkpoint("Wrong voice mode is enabled and no wrong voice contacts remain for this run. Not processing preset or AI-generated people.")
         else:
             # Round 1: use existing Drive list if available
             # Round 2+: always generate a fresh AI list
@@ -1387,9 +1456,12 @@ def main():
                 print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location})", flush=True)
 
                 folder_name = person.replace(" ", "_")
+                force_reprocess = person.lower() in FORCE_REPROCESS_PEOPLE
+                if person.lower() in WRONG_VOICE_PEOPLE:
+                    WRONG_VOICE_ATTEMPTED_PEOPLE.add(person.lower())
 
                 # Check if already processed using local cache
-                if person.lower() in PROCESSED_PEOPLE:
+                if not force_reprocess and person.lower() in PROCESSED_PEOPLE:
                     checkpoint(f"Skipping {person} — already in PROCESSED_PEOPLE cache.", flush=True)
                     remove_dynamic_person(person)
                     continue
@@ -1398,7 +1470,7 @@ def main():
                 service = get_drive_service()
                 if service:
                     merge_nested_materials_folder(service)
-                    if drive_person_has_ref(service, folder_name):
+                    if not force_reprocess and drive_person_has_ref(service, folder_name):
                         checkpoint(f"Skipping {person} because ref.wav exists in at least one matching Drive folder.", flush=True)
                         PROCESSED_PEOPLE.add(person.lower())
                         remove_dynamic_person(person)
@@ -1410,7 +1482,7 @@ def main():
                         person_folder_id = upload_results.get_drive_folder_id(service, folder_name, materials_id)
                         if person_folder_id:
                             contents = upload_results.get_drive_folder_contents(service, person_folder_id)
-                            if "ref.wav" in contents:
+                            if not force_reprocess and "ref.wav" in contents:
                                 checkpoint(f"Skipping {person} — ref.wav actually exists on Drive.", flush=True)
                                 PROCESSED_PEOPLE.add(person.lower())
                                 remove_dynamic_person(person)
@@ -1435,7 +1507,8 @@ def main():
                 success = False
 
                 for attempt in range(1, max_attempts + 1):
-                    print(f"\n--- Attempt {attempt}/{max_attempts} for {person} ---", flush=True)
+                    search_index = attempt + (FORCE_REPROCESS_SEARCH_OFFSET if force_reprocess else 0)
+                    print(f"\n--- Attempt {attempt}/{max_attempts} for {person} (Search index: {search_index}) ---", flush=True)
 
                     # Clear files for this attempt
                     for f in [full_wav, ref_wav, search_info_txt]:
@@ -1444,12 +1517,12 @@ def main():
                             except: pass
 
                     # Download
-                    print(f"Downloading audio for {person} (Search index: {attempt})...", flush=True)
+                    print(f"Downloading audio for {person} (Search index: {search_index})...", flush=True)
                     location_hint = f" {location}" if location else ""
                     query = f"{person}{location_hint} speaking speech original voice -interpreter -dubbed -translated -translator"
                     cookies_file = os.path.join(script_dir, "cookies.txt")
 
-                    def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=attempt):
+                    def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=search_index):
                         cmd = [
                             sys.executable, "-m", "yt_dlp",
                             f"{search_type}{item_index}:{_query}",
@@ -1529,6 +1602,7 @@ def main():
                         f.write(f"Keywords: {query}\n")
                         f.write(f"URL: {info_url}\n")
                         f.write(f"Attempt: {attempt}\n")
+                        f.write(f"Search index: {search_index}\n")
                         if location:
                             f.write(f"Location: {location}\n")
 

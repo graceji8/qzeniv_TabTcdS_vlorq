@@ -329,6 +329,55 @@ jobs:
             sleep 2
           fi
 
+          echo "========================================"
+          echo "  Famous people processing list preview"
+          echo "========================================"
+          echo "Process Voice List queue file: scripts/dynamic_famous_people.txt"
+          touch scripts/dynamic_famous_people.txt
+          if [ -s scripts/dynamic_famous_people.txt ]; then
+            nl -ba scripts/dynamic_famous_people.txt
+          else
+            echo "(empty or missing)"
+          fi
+          echo
+          echo "Wrong voice contacts file: ${WRONG_VOICE_CONTACTS_FILE:-C:\\email_solutions\\public\\config\\contacts.json}"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ.get("WRONG_VOICE_CONTACTS_FILE") or r"C:\email_solutions\public\config\contacts.json")
+          if not path.exists():
+              print("(missing on this runner)")
+              raise SystemExit(0)
+
+          try:
+              contacts = json.loads(path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              print(f"(could not read: {exc})")
+              raise SystemExit(0)
+
+          rows = []
+          for contact in contacts if isinstance(contacts, list) else []:
+              if contact.get("group") != "politicians":
+                  continue
+              redo = contact.get("voiceRedo") or {}
+              if contact.get("voiceStatus") != "wrong" and not (redo.get("referWav") or redo.get("cloneWav")):
+                  continue
+              rows.append("|".join([
+                  str(contact.get("name") or "").strip(),
+                  str(contact.get("gender") or "").strip(),
+                  str(contact.get("location") or contact.get("country") or "").strip(),
+              ]))
+
+          if not rows:
+              print("(none)")
+          for index, row in enumerate(rows, 1):
+              print(f"{index}\t{row}")
+          PY
+          echo "========================================"
+          echo
+
           if [ "${{ github.event.inputs.debug_mode }}" == "true" ]; then
             echo "Debug mode enabled. Skipping process_famous_people.py..."
             echo "Sleeping for 6 hours to allow SSH debugging..."
