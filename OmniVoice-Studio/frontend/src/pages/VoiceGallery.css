@@ -40,6 +40,22 @@
   flex: 1;
 }
 
+.tag-filter-select {
+  height: 30px;
+  min-width: 130px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  padding: 0 8px;
+}
+
+.tag-filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .categories-row {
   display: flex;
   flex-wrap: wrap;

@@ -125,6 +125,7 @@ def list_categories():
 @router.get("/gallery/voices")
 def list_voices(
     category: Optional[str] = Query(None, description="Filter by category"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
     search: Optional[str] = Query(None, description="Search by name or character"),
     limit: int = Query(50, ge=1, le=200),
 ):
@@ -136,9 +137,12 @@ def list_voices(
     if category:
         conditions.append("category = ?")
         params.append(category)
+    if tag:
+        conditions.append("tags LIKE ?")
+        params.append(f"%{tag}%")
     if search:
-        conditions.append("(name LIKE ? OR character LIKE ? OR description LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        conditions.append("(name LIKE ? OR character LIKE ? OR description LIKE ? OR tags LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -168,6 +172,22 @@ def get_voice(voice_id: str):
     r = dict(row)
     r["tags"] = json.loads(r.get("tags", "[]") or "[]")
     return r
+
+
+@router.get("/gallery/tags")
+def list_tags():
+    """List all gallery tags, including common preset tags."""
+    tags = {"Trump Team"}
+    with db_conn() as conn:
+        rows = conn.execute("SELECT tags FROM voice_gallery WHERE tags IS NOT NULL AND tags != ''").fetchall()
+    for row in rows:
+        try:
+            values = json.loads(row["tags"] or "[]")
+        except Exception:
+            values = []
+        if isinstance(values, list):
+            tags.update(str(value).strip() for value in values if str(value).strip())
+    return sorted(tags, key=lambda value: value.lower())
 
 
 @router.delete("/gallery/voices/{voice_id}")
@@ -338,6 +358,7 @@ async def upload_voice_clip(
     character: str = Form(...),
     category: str = Form(...),
     description: str = Form(""),
+    tags: str = Form(""),
     audio: UploadFile = File(...),
 ):
     """Upload a voice clip directly to the gallery."""
@@ -356,6 +377,18 @@ async def upload_voice_clip(
     except Exception:
         duration = 10.0
 
+    parsed_tags = [character.lower(), category]
+    if tags:
+        try:
+            incoming = json.loads(tags)
+            if isinstance(incoming, list):
+                parsed_tags.extend(str(tag).strip() for tag in incoming if str(tag).strip())
+            else:
+                parsed_tags.extend(tag.strip() for tag in str(tags).split(",") if tag.strip())
+        except Exception:
+            parsed_tags.extend(tag.strip() for tag in tags.split(",") if tag.strip())
+    parsed_tags = list(dict.fromkeys(parsed_tags))
+
     with db_conn() as conn:
         conn.execute(
             """
@@ -373,7 +406,7 @@ async def upload_voice_clip(
                 audio_path,
                 duration,
                 description,
-                json.dumps([character.lower(), category]),
+                json.dumps(parsed_tags),
                 time.time(),
             ),
         )
@@ -553,4 +586,3 @@ def voice_to_profile(voice_id: str):
     event_bus.emit("profiles", {"action": "created", "id": profile_id})
 
     return {"success": True, "profile_id": profile_id, "name": voice["name"]}
-

@@ -22,6 +22,7 @@ export const queryKeys = {
   setupStatus:     ['setup-status']    as const,
   galleryVoices:   (params?: any) => ['gallery-voices', params] as const,
   galleryCategories: ['gallery-categories'] as const,
+  galleryTags: ['gallery-tags'] as const,
 };
 
 // ── Polling queries (sysinfo, model status, logs) ────────────────────────
@@ -123,6 +124,14 @@ export function useGalleryCategories() {
   return useQuery({
     queryKey: queryKeys.galleryCategories,
     queryFn: galleryApi.listCategories,
+    staleTime: 60_000,
+  });
+}
+
+export function useGalleryTags() {
+  return useQuery({
+    queryKey: queryKeys.galleryTags,
+    queryFn: galleryApi.listTags,
     staleTime: 60_000,
   });
 }

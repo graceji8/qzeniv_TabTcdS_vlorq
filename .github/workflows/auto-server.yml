@@ -93,26 +93,88 @@ jobs:
 
       - name: Start tunnel and register URL
         run: |
-          # Start a simple status server the tunnel will point to
-          python3 -c "
-          import http.server, threading, json, os
+          # Start a small public status/proxy server. The tunnel points here,
+          # and /people is forwarded to process_famous_people.py's local queue API.
+          python3 <<'PY' &
+          import http.server
+          import json
+          import os
+          import threading
+          import time
+          import urllib.error
+          import urllib.request
+
           class H(http.server.BaseHTTPRequestHandler):
-              def log_message(self, *a): pass
-              def do_GET(self):
-                  self.send_response(200)
-                  self.send_header('Content-Type','application/json')
+              def log_message(self, *a):
+                  pass
+
+              def cors(self):
+                  self.send_header('Access-Control-Allow-Origin', '*')
+                  self.send_header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+                  self.send_header('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+
+              def send_json(self, code, payload):
+                  body = json.dumps(payload).encode()
+                  self.send_response(code)
+                  self.send_header('Content-Type', 'application/json')
+                  self.cors()
                   self.end_headers()
-                  self.wfile.write(json.dumps({'status':'running','run_id':os.environ.get('GITHUB_RUN_ID')}).encode())
+                  self.wfile.write(body)
+
+              def do_OPTIONS(self):
+                  self.send_response(204)
+                  self.cors()
+                  self.end_headers()
+
+              def do_GET(self):
+                  if self.path.rstrip('/') in ('/people', '/dynamic-people'):
+                      try:
+                          with urllib.request.urlopen('http://127.0.0.1:8765/people', timeout=10) as r:
+                              body = r.read()
+                          self.send_response(200)
+                          self.send_header('Content-Type', 'application/json')
+                          self.cors()
+                          self.end_headers()
+                          self.wfile.write(body)
+                      except Exception as e:
+                          self.send_json(503, {'status': 'starting', 'error': str(e), 'run_id': os.environ.get('GITHUB_RUN_ID')})
+                      return
+                  self.send_json(200, {'status': 'running', 'run_id': os.environ.get('GITHUB_RUN_ID')})
+
               def do_POST(self):
                   length = int(self.headers.get('Content-Length', 0))
                   body = self.rfile.read(length)
-                  print('POST received:', body.decode(), flush=True)
-                  self.send_response(200)
-                  self.end_headers()
-                  self.wfile.write(b'ok')
-          threading.Thread(target=http.server.HTTPServer(('',3000),H).serve_forever, daemon=True).start()
-          import time; time.sleep(999999)
-          " &
+                  if self.path.rstrip('/') in ('/people', '/dynamic-people'):
+                      req = urllib.request.Request(
+                          'http://127.0.0.1:8765/people',
+                          data=body,
+                          method='POST',
+                          headers={'Content-Type': self.headers.get('Content-Type', 'application/json')}
+                      )
+                      try:
+                          with urllib.request.urlopen(req, timeout=30) as r:
+                              resp_body = r.read()
+                              status = r.status
+                              content_type = r.headers.get('Content-Type', 'application/json')
+                          self.send_response(status)
+                          self.send_header('Content-Type', content_type)
+                          self.cors()
+                          self.end_headers()
+                          self.wfile.write(resp_body)
+                      except urllib.error.HTTPError as e:
+                          self.send_response(e.code)
+                          self.send_header('Content-Type', e.headers.get('Content-Type', 'application/json'))
+                          self.cors()
+                          self.end_headers()
+                          self.wfile.write(e.read())
+                      except Exception as e:
+                          self.send_json(503, {'error': 'process_famous_people.py queue API is not ready', 'detail': str(e)})
+                      return
+                  self.send_json(404, {'error': 'Not found'})
+
+          threading.Thread(target=http.server.HTTPServer(('', 3000), H).serve_forever, daemon=True).start()
+          time.sleep(999999)
+          PY
           sleep 2
 
           # Start tunnel, capture URL

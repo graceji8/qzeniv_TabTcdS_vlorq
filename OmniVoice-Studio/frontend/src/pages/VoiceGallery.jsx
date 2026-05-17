@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Button, Input } from '../ui';
 import { searchYoutube, downloadYoutubeClip, deleteGalleryVoice, saveVoiceAsProfile, uploadVoiceClip } from '../api/gallery';
-import { useGalleryCategories, useGalleryVoices } from '../api/hooks';
+import { useGalleryCategories, useGalleryTags, useGalleryVoices } from '../api/hooks';
 import AudioTrimmer from '../components/AudioTrimmer';
 import './VoiceGallery.css';
 import { askConfirm } from '../utils/dialog';
@@ -28,6 +28,7 @@ const CATEGORY_ICONS = {
 
 export default function VoiceGallery() {
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedTag, setSelectedTag] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -38,13 +39,15 @@ export default function VoiceGallery() {
   const [trimmingVoice, setTrimmingVoice] = useState(null);
 
   const { data: categories = [] } = useGalleryCategories();
+  const { data: tags = [] } = useGalleryTags();
   
   const queryParams = React.useMemo(() => {
     const p = {};
     if (selectedCategory) p.category = selectedCategory;
+    if (selectedTag) p.tag = selectedTag;
     if (searchQuery.trim()) p.search = searchQuery.trim();
     return p;
-  }, [selectedCategory, searchQuery]);
+  }, [selectedCategory, selectedTag, searchQuery]);
 
   const voicesQuery = useGalleryVoices(queryParams);
   const voices = voicesQuery.data || [];
@@ -238,6 +241,19 @@ export default function VoiceGallery() {
           <Button onClick={handleSearch} disabled={isSearching} size="sm">
             {isSearching ? <Loader size={14} className="spin" /> : <Search size={14} />}
           </Button>
+          <select
+            className="tag-filter-select"
+            value={selectedTag}
+            onChange={(e) => setSelectedTag(e.target.value)}
+            title="Filter by tag"
+          >
+            <option value="">All tags</option>
+            {[...new Set(['Trump Team', ...tags])]
+              .filter(Boolean)
+              .map((tag) => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+          </select>
         </div>
 
         <div className="categories-row">
@@ -285,7 +301,9 @@ export default function VoiceGallery() {
           <div className="content-title">
             {selectedCategory 
               ? categories.find(c => c.id === selectedCategory)?.name 
-              : 'All Voices'}
+              : selectedTag
+                ? `Tag: ${selectedTag}`
+                : 'All Voices'}
             <span className="count">({voices.length})</span>
           </div>
           <div className="view-toggle">

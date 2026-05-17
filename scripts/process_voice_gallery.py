@@ -111,6 +111,11 @@ def build_upload_command(upload_script, folder_path, folder_name, include_full_w
         cmd += ["--tag", "Trump Team"]
     return cmd
 
+def get_upload_tag_for_person(person):
+    if person and person.strip().lower() in TRUMP_TEAM_NAMES:
+        return "Trump Team"
+    return ""
+
 def fetch_processed_people(service):
     """Fetch all folder names from the materials directory that HAVE a ref.wav file."""
     global PROCESSED_PEOPLE
@@ -251,7 +256,8 @@ def sync_drive_to_api(service):
                         "name": clean_name,
                         "character": clean_name,
                         "category": cat_map.get(clean_name.lower(), "celebs"),
-                        "description": "Synced from Google Drive"
+                        "description": "Synced from Google Drive",
+                        "tags": get_upload_tag_for_person(clean_name),
                     },
                     files={"audio": ("ref.wav", fh, "audio/wav")},
                     timeout=30
@@ -1104,6 +1110,7 @@ def main():
                 # 6. Upload to local API so it appears in UI instantly
                 try:
                     api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
+                    upload_tag = get_upload_tag_for_person(person)
                     with open(ref_wav, "rb") as f:
                         resp = post_to_local_api(
                             f"{api_url}/gallery/upload",
@@ -1111,7 +1118,8 @@ def main():
                                 "name": person,
                                 "character": person,
                                 "category": cat_map.get(person.lower(), "celebs"),
-                                "description": f"Generated from YouTube. Search: {query}"
+                                "description": f"Generated from YouTube. Search: {query}",
+                                "tags": upload_tag,
                             },
                             files={"audio": ("ref.wav", f, "audio/wav")},
                             timeout=5

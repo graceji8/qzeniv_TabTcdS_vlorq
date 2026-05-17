@@ -1,5 +1,9 @@
 import os
 import sys
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 # Use home IP via SSH SOCKS proxy
 os.environ["YTDLP_PROXY"] = "socks5://127.0.0.1:1080"
@@ -68,6 +72,13 @@ _VAD_MODEL = None
 _VAD_UTILS = None
 PROCESSED_PEOPLE = set()
 MATERIALS_FOLDER_ID = "1bAgeolSPr9rHKL3xCi7FwHusm19N9Iq6"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DYNAMIC_PEOPLE_FILE = os.environ.get(
+    "FAMOUS_PEOPLE_DYNAMIC_FILE",
+    os.path.join(SCRIPT_DIR, "dynamic_famous_people.txt"),
+)
+DYNAMIC_PEOPLE_LOCK = threading.RLock()
+DEFAULT_SAMPLE_TEXT = "You're so lucky. You are so lucky to be an opera singer. I mean this."
 
 TRUMP_ADMIN_TEAM = [
     "Donald Trump|We will put America first and deliver results for the American people.|male|United States",
@@ -95,27 +106,237 @@ TRUMP_ADMIN_TEAM = [
     "Lee Zeldin|Environmental policy should protect communities while allowing the economy to grow.|male|United States",
 ]
 
+TRUMP_CHINA_VISIT_TEAM = [
+    # Confirmed in May 2026 China visit coverage from SCMP/Al Jazeera.
+    "Donald Trump|We want a fair relationship with China and a future of strong, peaceful cooperation.|male|United States",
+    "Melania Trump|Be best by helping children build kindness, courage, and respect.|female|United States",
+    "Eric Trump|Business works best when relationships are built directly and responsibly.|male|United States",
+    "Lara Trump|Strong families and strong communities are the foundation of public life.|female|United States",
+    "Marco Rubio|American foreign policy should make our nation stronger, safer, and more prosperous.|male|United States",
+    "Scott Bessent|A strong economy begins with sound policy and confidence in American growth.|male|United States",
+    "Pete Hegseth|Peace through strength requires readiness, discipline, and support for our troops.|male|United States",
+    "Jamieson Greer|Fair trade should strengthen American workers, farmers, and manufacturers.|male|United States",
+    "Stephen Miller|Policy must be clear, enforceable, and focused on the national interest.|male|United States",
+    "Elon Musk|When something is important enough, you do it even if the odds are not in your favor.|male|United States",
+    "Tim Cook|Life is fragile. We're not guaranteed a tomorrow so give it everything you've got.|male|United States",
+    "Jensen Huang|The future belongs to those who build it with courage, speed, and imagination.|male|United States",
+    "Larry Fink|Capital markets work best when long-term value and resilience guide decisions.|male|United States",
+    "Stephen Schwarzman|Great institutions are built by attracting talent and thinking long term.|male|United States",
+    "Kelly Ortberg|Aerospace leadership depends on safety, trust, and disciplined execution.|male|United States",
+    "Brian Sikes|Food systems require reliability, partnership, and investment across every supply chain.|male|United States",
+    "Jane Fraser|Finance should help clients navigate change and invest with confidence.|female|United States",
+    "Larry Culp|Operational excellence comes from focus, accountability, and serving customers well.|male|United States",
+    "David Solomon|Markets reward preparation, judgment, and the ability to adapt.|male|United States",
+    "Sanjay Mehrotra|Memory and storage are foundational technologies for the data-driven world.|male|United States",
+    "Cristiano Amon|Connectivity and intelligent computing will define the next generation of innovation.|male|United States",
+    "Ryan McInerney|Payments infrastructure should be secure, global, and trusted by everyone.|male|United States",
+    "Michael Miebach|Digital commerce grows when people and businesses can transact safely everywhere.|male|United States",
+    "Dina Powell McCormick|Partnerships between business and society can expand opportunity around the world.|female|United States",
+    "Jacob Thaysen|Genomics and life science tools can improve health through better data and access.|male|United States",
+]
+
+PRESET_PEOPLE_LISTS = {
+    "trump_admin_team": {
+        "label": "Trump administration team",
+        "upload_tag": "Trump Team",
+        "people": TRUMP_ADMIN_TEAM,
+    },
+    "trump_china_visit": {
+        "label": "Trump Team China visit May 2026",
+        "upload_tag": "Trump Team",
+        "people": TRUMP_CHINA_VISIT_TEAM,
+    },
+    "trump_teams": {
+        "label": "Trump Team China visit May 2026",
+        "upload_tag": "Trump Team",
+        "people": TRUMP_CHINA_VISIT_TEAM,
+    },
+}
+
+def get_person_name(item):
+    return item.split("|", 1)[0].strip()
+
+def normalize_dynamic_person_entry(data):
+    """Accept either a raw queue line or structured POST data."""
+    if isinstance(data, str):
+        entry = data.strip()
+    elif isinstance(data, dict):
+        entry = (data.get("entry") or data.get("line") or "").strip()
+        if not entry:
+            name = (data.get("name") or data.get("person") or "").strip()
+            if not name:
+                raise ValueError("Missing required field: name")
+            quote = (data.get("quote") or data.get("sample_text") or DEFAULT_SAMPLE_TEXT).strip()
+            gender = (data.get("gender") or "").strip()
+            country = (data.get("country") or data.get("location") or "").strip()
+            parts = [name, quote]
+            if gender or country:
+                parts.append(gender)
+            if country:
+                parts.append(country)
+            entry = "|".join(parts)
+    else:
+        raise ValueError("Unsupported request body")
+
+    if not entry or not get_person_name(entry):
+        raise ValueError("Entry must include a person name")
+    return entry
+
+def read_dynamic_people_list():
+    with DYNAMIC_PEOPLE_LOCK:
+        if not os.path.exists(DYNAMIC_PEOPLE_FILE):
+            return []
+        with open(DYNAMIC_PEOPLE_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")]
+
+def write_dynamic_people_list(items):
+    with DYNAMIC_PEOPLE_LOCK:
+        os.makedirs(os.path.dirname(DYNAMIC_PEOPLE_FILE), exist_ok=True)
+        with open(DYNAMIC_PEOPLE_FILE, "w", encoding="utf-8") as f:
+            for item in items:
+                f.write(item.strip() + "\n")
+
+def add_dynamic_person(entry):
+    entry = normalize_dynamic_person_entry(entry)
+    new_name = get_person_name(entry).lower()
+    with DYNAMIC_PEOPLE_LOCK:
+        items = read_dynamic_people_list()
+        if any(get_person_name(item).lower() == new_name for item in items):
+            return entry, False
+        write_dynamic_people_list(items + [entry])
+    return entry, True
+
+def remove_dynamic_person(person):
+    person_key = person.strip().lower()
+    if not person_key:
+        return False
+    with DYNAMIC_PEOPLE_LOCK:
+        items = read_dynamic_people_list()
+        remaining = [item for item in items if get_person_name(item).lower() != person_key]
+        if len(remaining) == len(items):
+            return False
+        write_dynamic_people_list(remaining)
+    checkpoint(f"Removed '{person}' from dynamic people queue.")
+    return True
+
+def get_dynamic_people_list():
+    with DYNAMIC_PEOPLE_LOCK:
+        items = read_dynamic_people_list()
+        if not items:
+            return []
+
+        seen = set()
+        pending = []
+        removed = []
+        for item in items:
+            name = get_person_name(item)
+            name_key = name.lower()
+            if not name_key or name_key in seen:
+                removed.append(name or item)
+                continue
+            seen.add(name_key)
+            if name_key in PROCESSED_PEOPLE:
+                removed.append(name)
+                continue
+            pending.append(item)
+
+        if removed:
+            write_dynamic_people_list(pending)
+            checkpoint(f"Removed {len(removed)} duplicate/already processed dynamic queue entries.")
+
+    if pending:
+        checkpoint(f"Using dynamic people queue first with {len(pending)} pending entries.")
+    return pending
+
+def start_dynamic_people_api():
+    if os.environ.get("FAMOUS_PEOPLE_DYNAMIC_API", "1").strip().lower() in {"0", "false", "no"}:
+        return None
+
+    host = os.environ.get("FAMOUS_PEOPLE_DYNAMIC_API_HOST", "127.0.0.1")
+    port = int(os.environ.get("FAMOUS_PEOPLE_DYNAMIC_API_PORT", "8765"))
+
+    class DynamicPeopleHandler(BaseHTTPRequestHandler):
+        def _send_json(self, status, payload):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path.rstrip("/") not in {"/people", "/dynamic-people"}:
+                self._send_json(404, {"error": "Not found"})
+                return
+            self._send_json(200, {"file": DYNAMIC_PEOPLE_FILE, "people": read_dynamic_people_list()})
+
+        def do_POST(self):
+            if self.path.rstrip("/") not in {"/people", "/dynamic-people"}:
+                self._send_json(404, {"error": "Not found"})
+                return
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length).decode("utf-8").strip()
+            try:
+                content_type = self.headers.get("Content-Type", "")
+                if "application/json" in content_type:
+                    payload = json.loads(raw_body or "{}")
+                elif "application/x-www-form-urlencoded" in content_type:
+                    form = parse_qs(raw_body)
+                    payload = {k: v[-1] for k, v in form.items()}
+                else:
+                    payload = raw_body
+                entry, added = add_dynamic_person(payload)
+                self._send_json(201 if added else 200, {"added": added, "entry": entry})
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+
+        def log_message(self, format, *args):
+            checkpoint("Dynamic people API: " + (format % args))
+
+    try:
+        server = ThreadingHTTPServer((host, port), DynamicPeopleHandler)
+    except OSError as e:
+        checkpoint(f"Could not start dynamic people API on {host}:{port}: {e}")
+        return None
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    checkpoint(f"Dynamic people API listening on http://{host}:{port}/people")
+    return server
+
 def post_to_local_api(url, **kwargs):
     """Call localhost API without inheriting the global SOCKS proxy."""
     session = requests.Session()
     session.trust_env = False
     return session.post(url, **kwargs)
 
-def get_trump_admin_team_list():
+def get_preset_people_list(preset_name):
+    preset = PRESET_PEOPLE_LISTS.get(preset_name)
+    if not preset:
+        return []
     filtered_people = []
-    for item in TRUMP_ADMIN_TEAM:
+    for item in preset["people"]:
         name = item.split("|")[0].strip().lower()
         if name in PROCESSED_PEOPLE:
-            checkpoint(f"Trump admin team list already processed '{name}'. Skipping.")
+            checkpoint(f"{preset['label']} already processed '{name}'. Skipping.")
             continue
         filtered_people.append(item)
     return filtered_people
 
-def is_trump_admin_team_member(person):
-    return person.strip().lower() in {
-        item.split("|")[0].strip().lower()
-        for item in TRUMP_ADMIN_TEAM
-    }
+def get_trump_admin_team_list():
+    return get_preset_people_list("trump_admin_team")
+
+def get_active_preset_name():
+    return os.environ.get("FAMOUS_PEOPLE_LIST", "trump_admin_team").strip().lower()
+
+def get_upload_tag_for_person(person):
+    person_key = person.strip().lower()
+    preset = PRESET_PEOPLE_LISTS.get(get_active_preset_name())
+    if preset and person_key in {item.split("|")[0].strip().lower() for item in preset["people"]}:
+        return preset["upload_tag"]
+    if person_key in {item.split("|")[0].strip().lower() for item in TRUMP_ADMIN_TEAM}:
+        return "Trump Team"
+    return None
 
 def build_upload_command(upload_script, folder_path, folder_name, include_full_wav=True, person=None):
     cmd = [
@@ -124,8 +345,9 @@ def build_upload_command(upload_script, folder_path, folder_name, include_full_w
     ]
     if not include_full_wav:
         cmd += ["--exclude", "full.wav"]
-    if person and is_trump_admin_team_member(person):
-        cmd += ["--tag", "Trump Team"]
+    upload_tag = get_upload_tag_for_person(person) if person else None
+    if upload_tag:
+        cmd += ["--tag", upload_tag]
     return cmd
 
 def fetch_processed_people(service):
@@ -232,7 +454,8 @@ def sync_drive_to_api(service):
                         "name": clean_name,
                         "character": clean_name,
                         "category": "Celebs",
-                        "description": "Synced from Google Drive"
+                        "description": "Synced from Google Drive",
+                        "tags": get_upload_tag_for_person(clean_name) or "",
                     },
                     files={"audio": ("ref.wav", fh, "audio/wav")},
                     timeout=30
@@ -750,23 +973,26 @@ def get_famous_people_from_drive(file_name="famous_people.txt", force_regenerate
 
     if not service:
         print("Could not get Google Drive service. Falling back to AI generation without avoid list.", flush=True)
-        if os.environ.get("FAMOUS_PEOPLE_LIST", "trump_admin_team").lower() == "trump_admin_team":
-            people = get_trump_admin_team_list()
+        list_name = get_active_preset_name()
+        if list_name in PRESET_PEOPLE_LISTS:
+            people = get_preset_people_list(list_name)
             if people:
-                checkpoint(f"Using Trump administration team list with {len(people)} entries.")
+                checkpoint(f"Using {PRESET_PEOPLE_LISTS[list_name]['label']} with {len(people)} entries.")
                 return people
         return generate_famous_people_with_ai(None)
 
     # Fetch processed people cache first
     fetch_processed_people(service)
 
-    list_name = os.environ.get("FAMOUS_PEOPLE_LIST", "trump_admin_team").strip().lower()
-    if list_name == "trump_admin_team":
-        people = get_trump_admin_team_list()
+    list_name = get_active_preset_name()
+    if list_name in PRESET_PEOPLE_LISTS:
+        people = get_preset_people_list(list_name)
         if people:
-            checkpoint(f"Using Trump administration team list with {len(people)} unprocessed entries.")
+            checkpoint(f"Using {PRESET_PEOPLE_LISTS[list_name]['label']} with {len(people)} unprocessed entries.")
             return people
-        checkpoint("Trump administration team list is exhausted; falling back to AI generation.")
+        checkpoint(f"{PRESET_PEOPLE_LISTS[list_name]['label']} is exhausted; falling back to AI generation.")
+        if os.environ.get("FAMOUS_PEOPLE_PRESET_ONLY", "").strip().lower() in {"1", "true", "yes"}:
+            return []
 
     # Generate fresh list with AI, generate_famous_people_with_ai handles avoiding existing subfolders
     people = generate_famous_people_with_ai(service)
@@ -833,13 +1059,14 @@ def upload_model_to_drive(service, local_model_path, folder_name="OmniVoice_mode
 
 def main():
     checkpoint("Starting process_famous_people.py")
+    start_dynamic_people_api()
     
     # Check proxy first
     if not check_proxy_readiness():
         checkpoint("WARNING: Proxy not ready. HF/YouTube downloads may fail.")
 
     checkpoint("Initializing OmniVoice model setup...")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = SCRIPT_DIR
     
     model_path = 'k2-fsa/OmniVoice'
     local_model_path = os.path.join(script_dir, "models", "OmniVoice")
@@ -985,8 +1212,15 @@ def main():
         print(f"  ROUND {round_num} — Fetching fresh list from Drive", flush=True)
         print(f"{'#'*40}", flush=True)
 
+        dynamic_people_data = get_dynamic_people_list()
         target_person_env = os.environ.get("TARGET_PERSON")
-        if target_person_env:
+        using_target_person = False
+        if dynamic_people_data:
+            famous_people_data = dynamic_people_data
+            if target_person_env:
+                print(f"Dynamic people queue has priority; TARGET_PERSON will run after the queue is empty: {target_person_env}", flush=True)
+        elif target_person_env:
+            using_target_person = True
             famous_people_data = [target_person_env]
             print(f"Using specific TARGET_PERSON: {target_person_env}", flush=True)
         else:
@@ -998,6 +1232,9 @@ def main():
             )
 
         if not famous_people_data:
+            if os.environ.get("RUN_ONCE", "").strip().lower() in {"1", "true", "yes"}:
+                print("No people found and RUN_ONCE is enabled. Exiting.", flush=True)
+                break
             print("No people found. Waiting 60s before retrying...", flush=True)
             time.sleep(60)
             continue
@@ -1019,7 +1256,7 @@ def main():
                     location = parts[3].strip() if len(parts) > 3 else None
                 else:
                     person = item.strip()
-                    sample_text = "You're so lucky. You are so lucky to be an opera singer. I mean this."
+                    sample_text = DEFAULT_SAMPLE_TEXT
                     target_gender = None
                     location = None
 
@@ -1030,6 +1267,7 @@ def main():
                 # Check if already processed using local cache
                 if person.lower() in PROCESSED_PEOPLE:
                     checkpoint(f"Skipping {person} — already in PROCESSED_PEOPLE cache.", flush=True)
+                    remove_dynamic_person(person)
                     continue
                 
                 # Extra check for ref.wav if cache might be stale
@@ -1044,6 +1282,7 @@ def main():
                             if "ref.wav" in contents:
                                 checkpoint(f"Skipping {person} — ref.wav actually exists on Drive.", flush=True)
                                 PROCESSED_PEOPLE.add(person.lower())
+                                remove_dynamic_person(person)
                                 continue
                 temp_base = os.path.join(script_dir, "temp_workspace")
                 os.makedirs(temp_base, exist_ok=True)
@@ -1197,6 +1436,7 @@ def main():
                     )
                     print(f"Uploaded {person} to Google Drive 'materials' subfolder.", flush=True)
                     PROCESSED_PEOPLE.add(person.lower())
+                    remove_dynamic_person(person)
                     print(f"PASS: {person} completed after Drive upload.", flush=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Upload failed for {person}: {e}", flush=True)
@@ -1204,6 +1444,7 @@ def main():
                 # Upload to local API so it appears in UI instantly
                 try:
                     api_url = os.environ.get("OMNIVOICE_API_URL", "http://localhost:8000")
+                    upload_tag = get_upload_tag_for_person(person)
                     with open(ref_wav, "rb") as f:
                         resp = post_to_local_api(
                             f"{api_url}/gallery/upload",
@@ -1211,7 +1452,8 @@ def main():
                                 "name": person,
                                 "character": person,
                                 "category": "Celebs",
-                                "description": f"Generated from YouTube. Location: {location or 'Unknown'}. Search: {query}"
+                                "description": f"Generated from YouTube. Location: {location or 'Unknown'}. Search: {query}",
+                                "tags": upload_tag or "",
                             },
                             files={"audio": ("ref.wav", f, "audio/wav")},
                             timeout=5
@@ -1226,8 +1468,11 @@ def main():
             print(f"\nBatch {batch_idx+1} complete. Pausing 5s before next batch...", flush=True)
             time.sleep(5)
 
-        if target_person_env:
-            print(f"Finished processing specific TARGET_PERSON: {target_person_env}. Exiting.", flush=True)
+        if using_target_person or os.environ.get("RUN_ONCE", "").strip().lower() in {"1", "true", "yes"}:
+            if using_target_person:
+                print(f"Finished processing specific TARGET_PERSON: {target_person_env}. Exiting.", flush=True)
+            else:
+                print("Finished one requested round. Exiting because RUN_ONCE is enabled.", flush=True)
             break
 
         print(f"\nRound {round_num} complete. Starting next round immediately...", flush=True)

@@ -24,8 +24,9 @@ export interface GalleryVoice {
 }
 
 export const listCategories = (): Promise<GalleryCategory[]> => apiJson('/gallery/categories');
+export const listTags = (): Promise<string[]> => apiJson('/gallery/tags');
 
-export const listGalleryVoices = (params?: { category?: string; search?: string; limit?: number }): Promise<GalleryVoice[]> => {
+export const listGalleryVoices = (params?: { category?: string; tag?: string; search?: string; limit?: number }): Promise<GalleryVoice[]> => {
   const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
   return apiJson(`/gallery/voices${query}`);
 };
