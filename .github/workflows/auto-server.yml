@@ -21,18 +21,18 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      # â”€â”€ 1. Checkout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Checkout
         uses: actions/checkout@v6
 
-      # ── 2. Python setup with pip cache ───────────────────────────────────────
+      # â”€â”€ 2. Python setup with pip cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── 3. Install dependencies ───────────────────────────────────────────────
+      # â”€â”€ 3. Install dependencies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Install dependencies
         run: |
           python -m venv venv
@@ -41,13 +41,13 @@ jobs:
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
           pip install -U yt-dlp
 
-      # ── 4. Install system dependencies ───────────────────────────────────────
+      # â”€â”€ 4. Install system dependencies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y espeak ffmpeg chromium-browser chromium-chromedriver openssh-server nodejs
 
-      # ── 5. Setup Google Drive Credentials ────────────────────────────────────
+      # â”€â”€ 5. Setup Google Drive Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Setup Google Drive Credentials
         run: |
           if [ -n "${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}" ]; then
@@ -57,7 +57,7 @@ jobs:
             echo "${{ secrets.GOOGLE_DRIVE_TOKEN }}" | base64 --decode > token.pickle
           fi
 
-      # ── 5b. Write YouTube cookies from secret ────────────────────────────────
+      # â”€â”€ 5b. Write YouTube cookies from secret â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Write YouTube cookies
         run: |
           if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
@@ -65,10 +65,10 @@ jobs:
             echo "${{ secrets.YOUTUBE_COOKIES }}" >> scripts/cookies.txt
             echo "cookies.txt written ($(wc -l < scripts/cookies.txt) lines)"
           else
-            echo "No YOUTUBE_COOKIES secret found — YouTube will be skipped, SoundCloud only"
+            echo "No YOUTUBE_COOKIES secret found â€” YouTube will be skipped, SoundCloud only"
           fi
 
-      # ── 5c. Warm up Chrome to generate cookies ────────────────────────────────
+      # â”€â”€ 5c. Warm up Chrome to generate cookies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Warm up Chrome profile (for yt-dlp cookies)
         run: |
           export DISPLAY=:99
@@ -88,7 +88,7 @@ jobs:
           echo "Chrome profile initialized at $HOME/.config/chromium"
           ls "$HOME/.config/chromium/Default/" || echo "Profile dir not found"
 
-      # ── 6. Start Cloudflare tunnel + register URL in KV ──────────────────────
+      # â”€â”€ 6. Start Cloudflare tunnel + register URL in KV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Install cloudflared
         run: |
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
@@ -225,7 +225,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"url\":\"$TUNNEL_URL\",\"run_id\":\"$GITHUB_RUN_ID\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
-      # ── 6b. Start SSH via Cloudflare ─────────────────────────────────────────
+      # â”€â”€ 6b. Start SSH via Cloudflare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Start SSH via Cloudflare
         if: github.event.inputs.debug_mode == 'true'
         run: |
@@ -278,11 +278,7 @@ jobs:
           echo "  Password: runner"
           echo "=========================================================="
 
-      # ── 6c. Connect Tailscale ────────────────────────────────────────────────
-      - name: Upgrade Tailscale
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          echo "✅ Tailscale version: $(tailscale version)"
+      # â”€â”€ 6c. Connect Tailscale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
       - name: Connect Tailscale
         uses: tailscale/github-action@v4
@@ -290,9 +286,9 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          args: --accept-routes
+          version: latest
 
-      # ── 6d. Setup Home Proxy via SSH ─────────────────────────────────────────
+      # â”€â”€ 6d. Setup Home Proxy via SSH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Setup Home Proxy via SSH
         run: |
           mkdir -p ~/.ssh
@@ -307,7 +303,7 @@ jobs:
             echo "WARNING: No SSH_PRIVATE_KEY secret found. Skipping home proxy setup."
           fi
 
-      # ── 7. Run Famous People Processing ──────────────────────────────────────
+      # â”€â”€ 7. Run Famous People Processing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Run process_famous_people.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -341,14 +337,14 @@ jobs:
             python scripts/process_famous_people.py 2>&1 | tee logs/process_famous.log
           fi
 
-      # ── 7b. Keep alive for debugging on failure ──────────────────────────────
+      # â”€â”€ 7b. Keep alive for debugging on failure â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Keep alive for debugging on failure
         if: failure() && github.event.inputs.debug_mode == 'true'
         run: |
           echo "Workflow failed in debug mode. Keeping runner alive for 6 hours..."
           sleep 21600
 
-      # ── 8. Deregister tunnel URL on completion ────────────────────────────────
+      # â”€â”€ 8. Deregister tunnel URL on completion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       - name: Deregister tunnel
         if: always()
         run: |
