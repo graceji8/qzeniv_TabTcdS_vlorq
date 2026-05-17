@@ -1239,6 +1239,81 @@ def upload_model_to_drive(service, local_model_path, folder_name="OmniVoice_mode
     
     print("Model uploaded to Google Drive.", flush=True)
 
+def load_omnivoice_model(script_dir):
+    checkpoint("Initializing OmniVoice model setup after successful audio download...")
+
+    model_path = 'k2-fsa/OmniVoice'
+    local_model_path = os.path.join(script_dir, "models", "OmniVoice")
+
+    has_local_weights = any(os.path.exists(os.path.join(local_model_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
+    if os.path.exists(local_model_path) and has_local_weights:
+        checkpoint(f"Local model found! Loading from: {local_model_path}")
+        model_path = local_model_path
+    else:
+        checkpoint("Searching for OmniVoice model on Google Drive...")
+        service = get_drive_service()
+        if service:
+            try:
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(300)
+                if download_model_from_drive(service, local_model_path):
+                    checkpoint("Model loaded from Google Drive cache.")
+                    model_path = local_model_path
+                else:
+                    checkpoint("Model not found on Google Drive.")
+            except TimeoutException:
+                checkpoint("ERROR: Google Drive model download TIMED OUT.")
+            finally:
+                signal.alarm(0)
+
+        if model_path == 'k2-fsa/OmniVoice':
+            checkpoint(f"Will download from Hugging Face: {model_path}")
+
+    checkpoint(f"Calling OmniVoice.from_pretrained({model_path})...")
+    try:
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(600)
+        model = OmniVoice.from_pretrained(model_path)
+        checkpoint("OmniVoice model ready.")
+    except TimeoutException:
+        checkpoint("ERROR: OmniVoice model loading TIMED OUT (10 min limit).")
+        return None
+    except Exception as e:
+        checkpoint(f"ERROR: OmniVoice loading failed: {e}")
+        return None
+    finally:
+        signal.alarm(0)
+
+    checkpoint("Loading ASR model after OmniVoice is ready...")
+    try:
+        service = get_drive_service()
+        asr_local_path = os.path.join(script_dir, "models", "OmniVoice_ASR")
+        has_asr_weights = os.path.exists(asr_local_path) and any(os.path.exists(os.path.join(asr_local_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
+        if service and not has_asr_weights:
+            checkpoint("Checking for ASR model on Google Drive...")
+            signal.alarm(300)
+            try:
+                if download_model_from_drive(service, asr_local_path, folder_name="OmniVoice_ASR_model"):
+                    os.environ["HF_HUB_CACHE"] = os.path.dirname(asr_local_path)
+                    checkpoint("ASR model loaded from Google Drive cache.")
+            finally:
+                signal.alarm(0)
+    except Exception as e:
+        checkpoint(f"ASR Drive cache check exception: {e}")
+
+    try:
+        signal.alarm(600)
+        model.load_asr_model()
+        checkpoint("ASR model initialized.")
+    except TimeoutException:
+        checkpoint("ERROR: ASR model loading TIMED OUT.")
+    except Exception as e:
+        checkpoint(f"ASR model load note: {e}")
+    finally:
+        signal.alarm(0)
+
+    return model
+
 def main():
     checkpoint("Starting process_famous_people.py")
     checkpoint(f"Process Voice List queue file: {DYNAMIC_PEOPLE_FILE}")
@@ -1248,141 +1323,14 @@ def main():
     if not check_proxy_readiness():
         checkpoint("WARNING: Proxy not ready. HF/YouTube downloads may fail.")
 
-    checkpoint("Initializing OmniVoice model setup...")
     script_dir = SCRIPT_DIR
-    
-    model_path = 'k2-fsa/OmniVoice'
-    local_model_path = os.path.join(script_dir, "models", "OmniVoice")
-    
-    has_local_weights = any(os.path.exists(os.path.join(local_model_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
-    if os.path.exists(local_model_path) and has_local_weights:
-        checkpoint(f"Local model found! Loading from: {local_model_path}")
-        model_path = local_model_path
-    else:
-        # Try downloading from Google Drive first
-        checkpoint("Searching for OmniVoice model on Google Drive...")
-        service = get_drive_service()
-        if service:
-            try:
-                # Set alarm for Drive download (5 mins)
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(300)
-                if download_model_from_drive(service, local_model_path):
-                    checkpoint(f"Model loaded from Google Drive cache.")
-                    model_path = local_model_path
-                else:
-                    checkpoint("Model not found on Google Drive.")
-            except TimeoutException:
-                checkpoint("ERROR: Google Drive model download TIMED OUT.")
-            finally:
-                signal.alarm(0)
-        
-        if model_path == 'k2-fsa/OmniVoice':
-            checkpoint(f"Will download from Hugging Face: {model_path}")
-
-    checkpoint(f"Calling OmniVoice.from_pretrained({model_path})...")
-    try:
-        # Set alarm for HF download/load (10 mins)
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(600)
-        model = OmniVoice.from_pretrained(model_path)
-        checkpoint("OmniVoice model ready.")
-    except TimeoutException:
-        checkpoint("ERROR: OmniVoice model loading TIMED OUT (10 min limit).")
-        return # Cannot proceed without model
-    except Exception as e:
-        checkpoint(f"ERROR: OmniVoice loading failed: {e}")
-        return
-    finally:
-        signal.alarm(0)
-    
-    # Pre-load the ASR model (try Google Drive cache first, then HuggingFace)
-    checkpoint("Pre-loading ASR model...")
-    asr_downloaded_from_hf = False
-    try:
-        # Check if ASR model is cached on Google Drive
-        service = get_drive_service()
-        asr_local_path = os.path.join(script_dir, "models", "OmniVoice_ASR")
-        has_asr_weights = os.path.exists(asr_local_path) and any(os.path.exists(os.path.join(asr_local_path, f)) for f in ["model.safetensors", "pytorch_model.bin"])
-        if service and not has_asr_weights:
-            checkpoint("Checking for ASR model on Google Drive...")
-            signal.alarm(300)
-            try:
-                if download_model_from_drive(service, asr_local_path, folder_name="OmniVoice_ASR_model"):
-                    # Set HF cache env so OmniVoice finds it
-                    os.environ["HF_HUB_CACHE"] = os.path.dirname(asr_local_path)
-                    checkpoint("ASR model loaded from Google Drive cache.")
-            finally:
-                signal.alarm(0)
-    except Exception as e:
-        checkpoint(f"ASR Drive cache check exception: {e}")
-    
-    checkpoint("Calling model.load_asr_model()...")
-    try:
-        signal.alarm(600)
-        model.load_asr_model()
-        checkpoint("ASR model initialized.")
-        asr_downloaded_from_hf = True
-    except TimeoutException:
-        checkpoint("ERROR: ASR model loading TIMED OUT.")
-    except Exception as e:
-        checkpoint(f"ASR model pre-load note: {e}")
-    finally:
-        signal.alarm(0)
-    
-    # Cache models to Google Drive for next time
-    checkpoint("Entering model caching phase...")
+    checkpoint("OmniVoice model download is deferred until after YouTube audio is downloaded.")
+    model = None
     service = get_drive_service()
-    
     if service:
-        # Sync existing Google Drive materials to the UI DB before starting the loop
         sync_drive_to_api(service)
-        
-        # Cache OmniVoice model
-        if model_path == 'k2-fsa/OmniVoice':
-            try:
-                checkpoint("Downloading snapshot for OmniVoice to cache to Drive...")
-                from huggingface_hub import snapshot_download
-                hf_local = snapshot_download(repo_id='k2-fsa/OmniVoice')
-                checkpoint(f"Snapshot downloaded to {hf_local}. Uploading to Drive...")
-                # Set a 5 min limit for upload
-                signal.alarm(300)
-                try:
-                    upload_model_to_drive(service, hf_local, folder_name="OmniVoice_model")
-                finally:
-                    signal.alarm(0)
-            except Exception as e:
-                checkpoint(f"Could not cache OmniVoice model to Drive: {e}")
-        
-        # Cache ASR model
-        if asr_downloaded_from_hf:
-            try:
-                import upload_results
-                asr_folder_id = upload_results.get_drive_folder_id(service, "OmniVoice_ASR_model")
-                if not asr_folder_id:
-                    checkpoint("ASR model not on Drive. Searching HF cache for upload...")
-                    # Find the ASR model in HF cache and upload
-                    hf_cache = os.path.expanduser("~/.cache/huggingface/hub")
-                    if os.path.exists(hf_cache):
-                        for d in os.listdir(hf_cache):
-                            full_d = os.path.join(hf_cache, d)
-                            if os.path.isdir(full_d) and "whisper" in d.lower():
-                                snap = os.path.join(full_d, "snapshots")
-                                if os.path.exists(snap):
-                                    subdirs = os.listdir(snap)
-                                    if subdirs:
-                                        asr_path = os.path.join(snap, subdirs[0])
-                                        checkpoint(f"Caching ASR model to Google Drive from {asr_path}...")
-                                        signal.alarm(300)
-                                        try:
-                                            upload_model_to_drive(service, asr_path, folder_name="OmniVoice_ASR_model")
-                                        finally:
-                                            signal.alarm(0)
-                                        break
-            except Exception as e:
-                checkpoint(f"Could not cache ASR model to Drive: {e}")
     
-    checkpoint("Model initialization and caching complete. Starting processing loop.")
+    checkpoint("Starting processing loop.")
     
     upload_script = os.path.join(script_dir, "upload_results.py")
 
@@ -1543,7 +1491,6 @@ def main():
                             cmd += ["--no-playlist"]
                         else:
                             cmd += ["--playlist-items", str(item_index)]
-                            cmd += ["--download-sections", "*0-600"]
                         is_youtube = search_type.startswith("ytsearch") or "youtube.com/" in source or "youtu.be/" in source
                         if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
                             cmd += ["--cookies", _cookies_file]
@@ -1627,6 +1574,12 @@ def main():
                         f.write(f"Search index: {search_index}\n")
                         if location:
                             f.write(f"Location: {location}\n")
+
+                    if model is None:
+                        model = load_omnivoice_model(script_dir)
+                        if model is None:
+                            print(f"Failed to load OmniVoice model for {person}.", flush=True)
+                            break
 
                     # VAD
                     try:
