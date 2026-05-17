@@ -1447,13 +1447,15 @@ def main():
                     sample_text = parts[1].strip()
                     target_gender = parts[2].strip() if len(parts) > 2 else None
                     location = parts[3].strip() if len(parts) > 3 else None
+                    source_url = parts[4].strip() if len(parts) > 4 else None
                 else:
                     person = item.strip()
                     sample_text = DEFAULT_SAMPLE_TEXT
                     target_gender = None
                     location = None
+                    source_url = None
 
-                print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location})", flush=True)
+                print(f"\nProcessing: {person} (Gender: {target_gender}, Location: {location}, URL: {source_url or 'search'})", flush=True)
 
                 folder_name = person.replace(" ", "_")
                 force_reprocess = person.lower() in FORCE_REPROCESS_PEOPLE
@@ -1523,10 +1525,10 @@ def main():
                     cookies_file = os.path.join(script_dir, "cookies.txt")
 
                     def build_cmd(search_type, use_cookies=False, _query=query, _full_wav=full_wav, _cookies_file=cookies_file, item_index=search_index):
+                        source = source_url or f"{search_type}{item_index}:{_query}"
                         cmd = [
                             sys.executable, "-m", "yt_dlp",
-                            f"{search_type}{item_index}:{_query}",
-                            "--playlist-items", str(item_index),
+                            source,
                             "-f", "ba*[language=en]/ba*[language=orig]/ba/worst",
                             "-x", "--audio-format", "wav",
                             "-o", _full_wav,
@@ -1535,7 +1537,9 @@ def main():
                             "--retries", "3", "--socket-timeout", "30",
                             "--extractor-args", "youtube:player-client=web,android"
                         ]
-                        is_youtube = search_type.startswith("ytsearch")
+                        if not source_url:
+                            cmd += ["--playlist-items", str(item_index)]
+                        is_youtube = search_type.startswith("ytsearch") or "youtube.com/" in source or "youtu.be/" in source
                         if use_cookies and is_youtube and _is_valid_cookies_file(_cookies_file):
                             cmd += ["--cookies", _cookies_file]
                         proxy = os.environ.get("YTDLP_PROXY")
@@ -1600,6 +1604,8 @@ def main():
 
                     with open(search_info_txt, "w", encoding="utf-8") as f:
                         f.write(f"Keywords: {query}\n")
+                        if source_url:
+                            f.write(f"Source URL: {source_url}\n")
                         f.write(f"URL: {info_url}\n")
                         f.write(f"Attempt: {attempt}\n")
                         f.write(f"Search index: {search_index}\n")
