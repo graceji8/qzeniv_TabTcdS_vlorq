@@ -1,8 +1,1 @@
-Steven Cheung|Voice sample for Steven Cheung.|male|United States|steven cheung trump spokesman|https://www.youtube.com/watch?v=n_9ld22ggCo
-Stephen Miller|Voice sample for Stephen Miller.|male|United States|https://www.youtube.com/watch?v=0FqJkeTihNI
-Tim Cook|Voice sample for Tim Cook.|male|United States
-He Lifeng|Voice sample for He Lifeng.|male|People's Republic of China
-Eric Trump|Voice sample for Eric Trump.|male|United States
-Melania Trump|Voice sample for Melania Trump.|female|Socialist Federal Republic of Yugoslavia
-Marco Rubio|Info file: https://drive.google.com/file/d/1dl74lSGo9tT9lE76cf1z0UGHLI1PTDut/view?usp=drivesdk||United States
-Pete Hegseth|Info file: https://drive.google.com/file/d/1ZnpmfsWArmCNaBaaPm6S7KeCLcTX8gSG/view?usp=drivesdk||United States
+Marco Rubio|Info file: https://drive.google.com/file/d/1dl74lSGo9tT9lE76cf1z0UGHLI1PTDut/view?usp=drivesdk||United States|https://www.youtube.com/watch?v=jM4QDSD2VWo

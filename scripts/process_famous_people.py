@@ -1575,12 +1575,6 @@ def main():
                         if location:
                             f.write(f"Location: {location}\n")
 
-                    if model is None:
-                        model = load_omnivoice_model(script_dir)
-                        if model is None:
-                            print(f"Failed to load OmniVoice model for {person}.", flush=True)
-                            break
-
                     # VAD
                     try:
                         signal.signal(signal.SIGALRM, timeout_handler)
@@ -1589,7 +1583,7 @@ def main():
                             full_wav,
                             ref_wav,
                             target_duration=8.0,
-                            asr_model=model,
+                            asr_model=None,
                             person_name=person,
                             target_gender=target_gender
                         )
@@ -1614,6 +1608,12 @@ def main():
                     except Exception as e:
                         print(f"Review upload failed for {person}: {e}", flush=True)
                     continue
+
+                if model is None:
+                    model = load_omnivoice_model(script_dir)
+                    if model is None:
+                        print(f"Failed to load OmniVoice model for {person}.", flush=True)
+                        continue
 
                 # Clone
                 try:
